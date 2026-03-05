@@ -296,7 +296,7 @@ const copyToMarkdown = () => {
   const turndownService = new TurndownService()
   turndownService.addRule('table', {
     filter: 'table',
-    replacement: function (content, node) {
+    replacement: function (content) {
       return '\n\n' + content + '\n\n'
     }
   })

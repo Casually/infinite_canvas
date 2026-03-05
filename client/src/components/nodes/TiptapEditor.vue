@@ -168,6 +168,8 @@ import json from 'highlight.js/lib/languages/json'
 import markdown from 'highlight.js/lib/languages/markdown'
 import yaml from 'highlight.js/lib/languages/yaml'
 
+let updateTimer: ReturnType<typeof setTimeout> | null = null
+
 const lowlight = createLowlight(common)
 lowlight.register('css', css)
 lowlight.register('javascript', js)
@@ -192,7 +194,7 @@ import CodeBlockComponent from './CodeBlockComponent.vue'
 import { uploadFile } from '../../utils/upload'
 import ImagePreview from '../ImagePreview.vue'
 import TableMaximizeModal from '../modals/TableMaximizeModal.vue'
-import { Maximize2, ArrowLeftToLine, ArrowRightToLine, Trash2, ArrowUpToLine, ArrowDownToLine, Merge, Split, PaintBucket, AlignLeft, AlignCenter, AlignRight, Copy, Check, ChevronDown, Palette } from 'lucide-vue-next'
+import { Maximize2, ArrowLeftToLine, ArrowRightToLine, Trash2, ArrowUpToLine, ArrowDownToLine, Merge, Split, PaintBucket, AlignLeft, AlignCenter, AlignRight } from 'lucide-vue-next'
 
 const props = defineProps<{
   modelValue: string
@@ -518,10 +520,23 @@ const editor = useEditor({
     CalendarExtension,
   ],
   onUpdate: ({ editor }) => {
-    emit('update:modelValue', editor.getHTML())
-    markDirty()
+    // Debounce the update emit to avoid frequent re-renders in parent
+    if (updateTimer) clearTimeout(updateTimer)
+    updateTimer = setTimeout(() => {
+      const html = editor.getHTML()
+      if (html !== props.modelValue) {
+        emit('update:modelValue', html)
+        markDirty()
+      }
+    }, 300)
   },
   onBlur: () => {
+    // Ensure final state is saved on blur
+    if (updateTimer) clearTimeout(updateTimer)
+    if (editor.value) {
+      emit('update:modelValue', editor.value.getHTML())
+    }
+    markDirty()
     emit('blur')
   },
   editorProps: {

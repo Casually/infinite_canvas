@@ -135,27 +135,25 @@ const formatCode = async () => {
     // We can't just set textContent.
     // We need to use updateAttributes? No, content is not an attribute.
     // We need to dispatch a transaction.
-    if (props.updateAttributes && props.deleteNode) {
-       const pos = props.getPos()
-       if (typeof pos === 'number') {
-          // Use chain command to safely update content
-          // First clear the content, then insert new content
-          // Or just replace the whole node? No, keep attributes.
-          
-          // Correct way to replace text content in a node:
-          const tr = props.editor.state.tr
-          const start = pos + 1
-          const end = pos + props.node.nodeSize - 1
-          
-          // Check if range is valid
-          if (start < end) {
-             tr.delete(start, end)
-          }
-          // Insert the formatted code
-          tr.insertText(formattedCode, start)
-          
-          props.editor.view.dispatch(tr)
+    const pos = props.getPos()
+    if (typeof pos === 'number') {
+       // Use chain command to safely update content
+       // First clear the content, then insert new content
+       // Or just replace the whole node? No, keep attributes.
+       
+       // Correct way to replace text content in a node:
+       const tr = props.editor.state.tr
+       const start = pos + 1
+       const end = pos + props.node.nodeSize - 1
+       
+       // Check if range is valid
+       if (start < end) {
+          tr.delete(start, end)
        }
+       // Insert the formatted code
+       tr.insertText(formattedCode, start)
+       
+       props.editor.view.dispatch(tr)
     }
     
     formatted.value = true

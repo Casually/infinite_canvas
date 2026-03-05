@@ -1696,16 +1696,29 @@ const currentFontColor = ref('#000000')
 const selectedNodes = computed(() => getSelectedNodes.value)
 
 // 监听选中节点变化，高亮相关连线
-watch(selectedNodes, (nodes) => {
-  const selectedIds = new Set(nodes.map(n => n.id))
+// 优化：仅在选中状态真正改变时才触发样式更新，避免不必要的遍历
+// Vue Flow 已经处理了选择逻辑，我们只需要响应选择集的变化
+watch(selectedNodes, (newSelected, oldSelected) => {
+  // 如果选中集合没有变化（例如只是内部属性变化），则跳过
+  // 注意：selectedNodes 是 computed，每次依赖变化都会重新计算
+  // 这里我们假设 getSelectedNodes 返回的是新的数组引用
   
-  edges.value = edges.value.map(edge => {
+  // 快速检查：如果新旧都为空，无需操作
+  if (newSelected.length === 0 && (!oldSelected || oldSelected.length === 0)) return
+
+  const selectedIds = new Set(newSelected.map(n => n.id))
+  
+  // 只有当边的状态需要改变时才更新 edges
+  let hasChanges = false
+  
+  const newEdges = edges.value.map(edge => {
     const isConnected = selectedIds.has(edge.source) || selectedIds.has(edge.target)
     const isHighlighted = edge.data?.isHighlighted
     
     if (selectedIds.size > 0 && isConnected) {
       if (isHighlighted) return edge // 已经是高亮状态，无需更新
       
+      hasChanges = true
       // 保存原始样式
       const originalStyle = edge.style || {}
       const originalAnimated = edge.animated || false
@@ -1739,6 +1752,7 @@ watch(selectedNodes, (nodes) => {
     } else {
       if (!isHighlighted) return edge // 已经是普通状态，无需更新
       
+      hasChanges = true
       // 恢复原始样式
       const { originalStyle, originalAnimated, originalLabelStyle, originalZIndex, ...restData } = edge.data || {}
       
@@ -1755,7 +1769,11 @@ watch(selectedNodes, (nodes) => {
       }
     }
   })
-}, { deep: true })
+  
+  if (hasChanges) {
+     edges.value = newEdges
+  }
+}, { deep: false }) // 关闭 deep watch，只监听数组引用变化
 
 const closeMenu = () => {
   menu.visible = false
@@ -2296,7 +2314,7 @@ const handleCopyMarkdown = () => {
   // Custom rule for table
   turndownService.addRule('table', {
     filter: 'table',
-    replacement: function (content, node) {
+    replacement: function (content) {
       // Simple table support, improved libraries exist but this is basic
       return '\n\n' + content + '\n\n'
     }
@@ -2325,6 +2343,8 @@ const handleCopyMarkdown = () => {
     addToast('无内容可复制', 'info')
   }
 }
+
+provide('handleCopyMarkdown', handleCopyMarkdown)
 </script>
 
 <style>
