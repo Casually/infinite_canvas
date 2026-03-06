@@ -283,6 +283,7 @@ const resetSize = () => {
 }
 
 import TurndownService from 'turndown'
+import { gfm } from 'turndown-plugin-gfm'
 import { useToast } from '../../composables/useToast'
 
 const { addToast } = useToast()
@@ -294,12 +295,7 @@ const copyToMarkdown = () => {
   }
   
   const turndownService = new TurndownService()
-  turndownService.addRule('table', {
-    filter: 'table',
-    replacement: function (content) {
-      return '\n\n' + content + '\n\n'
-    }
-  })
+  turndownService.use(gfm)
   
   const markdown = turndownService.turndown(props.data.content)
   navigator.clipboard.writeText(markdown)

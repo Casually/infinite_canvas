@@ -20,6 +20,8 @@ load_dotenv()
 import gzip
 import io
 import base64
+import subprocess
+import tempfile
 
 app = Flask(__name__)
 # Enable CORS for all domains on all routes
@@ -1076,10 +1078,10 @@ def load_canvas_legacy(current_user):
             canvas = Canvas(owner_id=current_user.id, title="迁移画布", content=old_data.content)
             db.session.add(canvas)
             db.session.commit()
-        else:
-            return jsonify({'content': None})
-            
-    return jsonify({'content': canvas.content, 'updated_at': canvas.updated_at, 'id': canvas.id})
+    
+    if canvas:
+        return jsonify({'content': canvas.content})
+    return jsonify({'content': None})
 
 # WebSocket Events
 @socketio.on('join')
@@ -1237,7 +1239,92 @@ def fetch_metadata():
             'error': str(e)
         })
 
+@app.route('/api/execute', methods=['POST'])
+def execute_code():
+    data = request.get_json()
+    code = data.get('code')
+    language = data.get('language')
+    
+    if not code or not language:
+        return jsonify({'message': '代码或语言不能为空'}), 400
+        
+    language = language.lower()
+    
+    # Supported languages map to execution details
+    # (suffix, command list generator)
+    lang_config = {
+        'python': ('.py', lambda path: ['python3', path]),
+        'py': ('.py', lambda path: ['python3', path]),
+        'javascript': ('.js', lambda path: ['node', path]),
+        'js': ('.js', lambda path: ['node', path]),
+        'nodejs': ('.js', lambda path: ['node', path]),
+        'lua': ('.lua', lambda path: ['lua', path]),
+        'java': ('.java', lambda path: ['java', path]), # Single file source code execution (Java 11+)
+    }
+    
+    if language not in lang_config:
+        return jsonify({'message': f'本地运行暂不支持该语言: {language}'}), 400
+        
+    suffix, cmd_gen = lang_config[language]
+        
+    try:
+        # Create a temporary file
+        # For Java, the class name must match filename if public, but we can't easily parse that.
+        # Java 11+ supports running single file source code directly without compilation step if we don't declare public class with different name.
+        # But `java temp.java` works if class is not public or matches.
+        # We'll use a generic name.
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False) as f:
+            f.write(code)
+            temp_path = f.name
+            
+        try:
+            cmd = cmd_gen(temp_path)
+            
+            # Check if runtime exists
+            try:
+                subprocess.run([cmd[0], '--version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            except FileNotFoundError:
+                 return jsonify({'message': f'服务端未安装运行环境: {cmd[0]}' }), 500
+
+            # Run with timeout
+            result = subprocess.run(
+                cmd, 
+                capture_output=True, 
+                text=True, 
+                timeout=10 # 10 seconds timeout
+            )
+            
+            output = result.stdout
+            if result.stderr:
+                # Some languages output to stderr even for non-errors, but usually it's mixed.
+                # We append it.
+                if output:
+                    output += '\n'
+                output += result.stderr
+                
+            return jsonify({
+                'result': output, 
+                'exit_code': result.returncode
+            })
+            
+        except subprocess.TimeoutExpired:
+            return jsonify({
+                'result': 'Execution timed out (10s limit)',
+                'exit_code': 124
+            })
+        finally:
+            # Clean up temp file
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        
+    except Exception as e:
+        print(f"Execution error: {e}")
+        return jsonify({'message': f'执行出错: {str(e)}'}), 500
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    socketio.run(app, debug=False, port=5001, allow_unsafe_werkzeug=True)
+    # socketio.run(app, debug=True, port=5001)
+    # Allow 0.0.0.0 for external access
+    socketio.run(app, debug=True, port=5001, host='0.0.0.0', allow_unsafe_werkzeug=True)

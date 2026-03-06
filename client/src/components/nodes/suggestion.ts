@@ -1,18 +1,9 @@
 import { VueRenderer } from '@tiptap/vue-3'
 import tippy from 'tippy.js'
 import CommandsList from './CommandsList.vue'
-import { Heading1, Heading2, Heading3, List, CheckSquare, Table, Image as ImageIcon, PenTool, Link, Globe, BarChart, Video, Music, Code, Minus, Highlighter, Sigma, Info, Calendar, Paperclip } from 'lucide-vue-next'
+import { Heading1, Heading2, Heading3, List, CheckSquare, Table, Image as ImageIcon, PenTool, Link, Globe, BarChart, Video, Music, Code, Minus, Highlighter, Sigma, Info, Calendar, Paperclip, GitGraph, Workflow, BrainCircuit, Clock } from 'lucide-vue-next'
 
-export const getSuggestion = (context: { 
-  openDrawing: () => void, 
-  openImage: () => void,
-  openVideo: () => void,
-  openAudio: () => void,
-  openFile: () => void,
-  openLink: () => void,
-  openWebsiteCard: () => void,
-  openECharts: (initialData?: any, type?: string) => void
-}) => {
+export const getSuggestion = (context: any) => {
   return {
     items: ({ query }: { query: string }) => {
       const items = [
@@ -84,6 +75,71 @@ export const getSuggestion = (context: {
           icon: Sigma,
           command: ({ editor, range }: any) => {
             editor.chain().focus().deleteRange(range).setMath().run()
+          },
+        },
+        {
+          title: '流程图',
+          icon: Workflow,
+          command: ({ editor, range }: any) => {
+            editor.chain().focus().deleteRange(range).insertContent({
+              type: 'mermaid',
+              attrs: {
+                content: 'graph TD\nA[Start] --> B{Is it?}\nB -- Yes --> C[OK]\nC --> D[Rethink]\nD --> B\nB -- No --> E[End]',
+                type: 'flowchart'
+              }
+            }).run()
+          },
+        },
+        {
+          title: '思维导图',
+          icon: BrainCircuit,
+          command: ({ editor, range }: any) => {
+            editor.chain().focus().deleteRange(range).insertContent({
+              type: 'mermaid',
+              attrs: {
+                content: 'mindmap\n  root((思维导图))\n    分支1\n    分支2\n      子分支2.1\n      子分支2.2',
+                type: 'mindmap'
+              }
+            }).run()
+          },
+        },
+        {
+          title: '甘特图',
+          icon: GitGraph,
+          command: ({ editor, range }: any) => {
+            editor.chain().focus().deleteRange(range).insertContent({
+              type: 'mermaid',
+              attrs: {
+                content: 'gantt\n    title A Gantt Diagram\n    dateFormat  YYYY-MM-DD\n    section Section\n    A task           :a1, 2014-01-01, 30d\n    Another task     :after a1  , 20d\n    section Another\n    Task in sec      :2014-01-12  , 12d\n    another task      : 24d',
+                type: 'gantt'
+              }
+            }).run()
+          },
+        },
+        {
+          title: '时间线',
+          icon: Clock,
+          command: ({ editor, range }: any) => {
+            editor.chain().focus().deleteRange(range).insertContent({
+              type: 'mermaid',
+              attrs: {
+                content: 'timeline\n    title History of Social Media Platform\n    2002 : LinkedIn\n    2004 : Facebook\n         : Google\n    2005 : Youtube\n    2006 : Twitter',
+                type: 'timeline'
+              }
+            }).run()
+          },
+        },
+        {
+          title: 'Mermaid',
+          icon: Workflow,
+          command: ({ editor, range }: any) => {
+            editor.chain().focus().deleteRange(range).insertContent({
+              type: 'mermaid',
+              attrs: {
+                content: 'graph TD\nA[Start] --> B[End]',
+                type: 'flowchart'
+              }
+            }).run()
           },
         },
         {

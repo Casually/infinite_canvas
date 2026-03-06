@@ -148,6 +148,7 @@ import Highlight from '@tiptap/extension-highlight'
 import MathExtension from './MathExtension'
 import CalloutExtension from './CalloutExtension'
 import CalendarExtension from './CalendarExtension'
+import MermaidExtension from './MermaidExtension'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { common, createLowlight } from 'lowlight'
 import css from 'highlight.js/lib/languages/css'
@@ -167,6 +168,8 @@ import bash from 'highlight.js/lib/languages/bash'
 import json from 'highlight.js/lib/languages/json'
 import markdown from 'highlight.js/lib/languages/markdown'
 import yaml from 'highlight.js/lib/languages/yaml'
+
+import { marked } from 'marked'
 
 let updateTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -518,6 +521,7 @@ const editor = useEditor({
     MathExtension,
     CalloutExtension,
     CalendarExtension,
+    MermaidExtension,
   ],
   onUpdate: ({ editor }) => {
     // Debounce the update emit to avoid frequent re-renders in parent
@@ -546,6 +550,30 @@ const editor = useEditor({
     handlePaste: (view, event) => {
       const item = event.clipboardData?.items[0]
       if (item) {
+        if (item.type === 'text/plain') {
+           const plainText = event.clipboardData?.getData('text/plain')
+           if (plainText) {
+              // Heuristic check
+              const looksLikeMarkdown = /^(#|\-|\*|>|`|\[|1\.)/m.test(plainText) || /(\*\*|__)/.test(plainText)
+              
+              if (looksLikeMarkdown) {
+                 try {
+                   // Synchronous parsing
+                   const html = marked.parse(plainText, { async: false }) as string
+                   
+                   if (html) {
+                      if (editor.value) {
+                         editor.value.commands.insertContent(html)
+                         return true
+                      }
+                   }
+                 } catch (e) {
+                   console.error('Markdown parse error', e)
+                 }
+              }
+           }
+        }
+        
         const file = item.getAsFile()
         if (file) {
           if (item.type.startsWith('image/')) {

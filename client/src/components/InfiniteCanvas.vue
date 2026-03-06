@@ -2307,18 +2307,11 @@ const createNoteAt = (clientX?: number, clientY?: number) => {
 }
 
 import TurndownService from 'turndown'
+import { gfm } from 'turndown-plugin-gfm'
 
 const handleCopyMarkdown = () => {
   const turndownService = new TurndownService()
-  
-  // Custom rule for table
-  turndownService.addRule('table', {
-    filter: 'table',
-    replacement: function (content) {
-      // Simple table support, improved libraries exist but this is basic
-      return '\n\n' + content + '\n\n'
-    }
-  })
+  turndownService.use(gfm)
 
   let markdown = ''
   
