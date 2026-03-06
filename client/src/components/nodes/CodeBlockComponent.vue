@@ -53,7 +53,15 @@
          <span class="flex-1 whitespace-pre-wrap break-all">{{ output }}</span>
          <div class="flex gap-1 shrink-0 ml-2 sticky top-0">
             <button 
-              @click="copyOutput" 
+              @click="output = ''; outputError = false" 
+              class="p-1 hover:bg-white/10 rounded transition-colors"
+              :class="outputError ? 'text-red-300 hover:text-red-100' : 'text-gray-400 hover:text-gray-200'"
+              title="清除结果"
+            >
+              <Trash2 class="w-3.5 h-3.5" />
+            </button>
+            <button 
+              @click="copyOutput"  
               class="p-1 hover:bg-white/10 rounded transition-colors"
               :class="outputError ? 'text-red-300 hover:text-red-100' : 'text-gray-400 hover:text-gray-200'"
               title="复制结果"
@@ -79,7 +87,7 @@
 <script setup lang="ts">
 import { NodeViewContent, nodeViewProps, NodeViewWrapper } from '@tiptap/vue-3'
 import { computed, ref } from 'vue'
-import { Copy, Check, Wand2, Play, Loader2, Bot } from 'lucide-vue-next'
+import { Copy, Check, Wand2, Play, Loader2, Bot, Trash2 } from 'lucide-vue-next'
 import * as prettier from 'prettier/standalone'
 import * as prettierPluginBabel from 'prettier/plugins/babel'
 import * as prettierPluginEstree from 'prettier/plugins/estree'
@@ -93,7 +101,7 @@ const props = defineProps(nodeViewProps)
 const languages = [
   'css', 'javascript', 'typescript', 'html', 'python', 
   'java', 'c', 'cpp', 'csharp', 'go', 'rust', 'php', 
-  'sql', 'bash', 'json', 'markdown', 'yaml'
+  'sql', 'bash', 'json', 'markdown', 'yaml', 'lua'
 ]
 
 const selectedLanguage = computed({

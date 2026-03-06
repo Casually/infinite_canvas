@@ -130,10 +130,8 @@ import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import TaskList from '@tiptap/extension-task-list'
 import CustomTaskItem from './CustomTaskItem'
-import Table from '@tiptap/extension-table'
-import TableRow from '@tiptap/extension-table-row'
-import TableCell from '@tiptap/extension-table-cell'
-import TableHeader from '@tiptap/extension-table-header'
+import { Table, TableRow, TableHeader, CustomTableCell } from './TableExtensions'
+import TableNodeComponent from './TableNode.vue'
 import Image from '@tiptap/extension-image'
 import Link from '@tiptap/extension-link'
 import TextAlign from '@tiptap/extension-text-align'
@@ -192,7 +190,6 @@ lowlight.register('json', json)
 lowlight.register('markdown', markdown)
 lowlight.register('yaml', yaml)
 
-import TableNode from './TableNode.vue'
 import CodeBlockComponent from './CodeBlockComponent.vue'
 import { uploadFile } from '../../utils/upload'
 import ImagePreview from '../ImagePreview.vue'
@@ -439,48 +436,12 @@ const editor = useEditor({
       resizable: !props.disableTableResize,
     }).extend({
       addNodeView() {
-        return VueNodeViewRenderer(TableNode)
+        return VueNodeViewRenderer(TableNodeComponent)
       }
     }),
     TableRow,
     TableHeader,
-    TableCell.extend({
-      addAttributes() {
-        return {
-          ...this.parent?.(),
-          colwidth: {
-            default: null,
-            parseHTML: element => {
-              const colwidth = element.getAttribute('data-colwidth')
-              return colwidth ? colwidth.split(',').map(w => parseInt(w, 10)) : null
-            },
-            renderHTML: attributes => {
-              if (!attributes.colwidth) {
-                return {}
-              }
-              const width = attributes.colwidth.reduce((a: number, b: number) => a + b, 0)
-              return {
-                'data-colwidth': attributes.colwidth,
-                style: `width: ${width}px`,
-              }
-            },
-          },
-          backgroundColor: {
-            default: null,
-            parseHTML: element => element.getAttribute('data-background-color'),
-            renderHTML: attributes => {
-              if (!attributes.backgroundColor) {
-                return {}
-              }
-              return {
-                'data-background-color': attributes.backgroundColor,
-                style: `background-color: ${attributes.backgroundColor}`,
-              }
-            },
-          },
-        }
-      },
-    }),
+    CustomTableCell,
     TextAlign.configure({
       types: ['heading', 'paragraph', 'tableCell', 'tableHeader'],
     }),
@@ -490,7 +451,11 @@ const editor = useEditor({
     }),
     Link.configure({
       openOnClick: false,
-      autolink: true
+      autolink: true,
+      HTMLAttributes: {
+        target: '_blank',
+        rel: 'noopener noreferrer nofollow',
+      },
     }).extend({
       addInputRules() {
         return [

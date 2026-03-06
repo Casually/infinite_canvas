@@ -20,7 +20,7 @@
             @click="exportToImage" 
             class="px-3 py-1.5 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700 flex items-center gap-1"
           >
-            <Image class="w-4 h-4" /> 导出图片
+            <ImageIcon class="w-4 h-4" /> 导出图片
           </button>
           <button @click="$emit('close')" class="text-gray-400 hover:text-gray-500 ml-2" title="取消">
             <X class="w-6 h-6" />
@@ -96,15 +96,31 @@
 
 <script setup lang="ts">
 import { ref, onBeforeUnmount, onMounted } from 'vue'
-import { useEditor, EditorContent } from '@tiptap/vue-3'
+import { useEditor, EditorContent, VueNodeViewRenderer } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
-import Table from '@tiptap/extension-table'
-import TableRow from '@tiptap/extension-table-row'
-import TableCell from '@tiptap/extension-table-cell'
-import TableHeader from '@tiptap/extension-table-header'
-import { Download, Image, X, ArrowLeftToLine, ArrowRightToLine, Trash2, ArrowUpToLine, ArrowDownToLine, Merge, Split, PaintBucket, Save } from 'lucide-vue-next'
+import { Table, TableRow, TableHeader, CustomTableCell } from '../nodes/TableExtensions'
+import Image from '@tiptap/extension-image'
+import Link from '@tiptap/extension-link'
+import TaskList from '@tiptap/extension-task-list'
+import TaskItem from '@tiptap/extension-task-item'
+import TextAlign from '@tiptap/extension-text-align'
+import Highlight from '@tiptap/extension-highlight'
+import MathExtension from '../nodes/MathExtension'
+import MermaidExtension from '../nodes/MermaidExtension'
+import WebsiteCard from '../nodes/WebsiteCard'
+import EChartsExtension from '../nodes/EChartsExtension'
+import VideoExtension from '../nodes/VideoExtension'
+import AudioExtension from '../nodes/AudioExtension'
+import CalloutExtension from '../nodes/CalloutExtension'
+import CalendarExtension from '../nodes/CalendarExtension'
+import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
+import { common, createLowlight } from 'lowlight'
+import CodeBlockComponent from '../nodes/CodeBlockComponent.vue'
+import { Download, Image as ImageIcon, X, ArrowLeftToLine, ArrowRightToLine, Trash2, ArrowUpToLine, ArrowDownToLine, Merge, Split, PaintBucket, Save } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import html2canvas from 'html2canvas'
+
+const lowlight = createLowlight(common)
 
 const props = defineProps<{
   initialContent: any
@@ -147,49 +163,47 @@ const tableColors = [
 const editor = useEditor({
   content: props.initialContent,
   extensions: [
-    StarterKit,
+    StarterKit.configure({
+      codeBlock: false,
+    }),
     Table.configure({
       resizable: true,
     }),
     TableRow,
     TableHeader,
-    TableCell.extend({
-      addAttributes() {
-        return {
-          ...this.parent?.(),
-          colwidth: {
-            default: null,
-            parseHTML: element => {
-              const colwidth = element.getAttribute('data-colwidth')
-              return colwidth ? colwidth.split(',').map(w => parseInt(w, 10)) : null
-            },
-            renderHTML: attributes => {
-              if (!attributes.colwidth) {
-                return {}
-              }
-              const width = attributes.colwidth.reduce((a: number, b: number) => a + b, 0)
-              return {
-                'data-colwidth': attributes.colwidth,
-                style: `width: ${width}px`,
-              }
-            },
-          },
-          backgroundColor: {
-            default: null,
-            parseHTML: element => element.getAttribute('data-background-color'),
-            renderHTML: attributes => {
-              if (!attributes.backgroundColor) {
-                return {}
-              }
-              return {
-                'data-background-color': attributes.backgroundColor,
-                style: `background-color: ${attributes.backgroundColor}`,
-              }
-            },
-          },
-        }
+    CustomTableCell,
+    Image,
+    Link.configure({
+      openOnClick: false,
+      autolink: true,
+      HTMLAttributes: {
+        target: '_blank',
+        rel: 'noopener noreferrer nofollow',
       },
     }),
+    TaskList,
+    TaskItem.configure({
+      nested: true,
+    }),
+    TextAlign.configure({
+      types: ['heading', 'paragraph', 'tableCell', 'tableHeader'],
+    }),
+    Highlight,
+    CodeBlockLowlight.configure({
+      lowlight,
+    }).extend({
+      addNodeView() {
+        return VueNodeViewRenderer(CodeBlockComponent)
+      },
+    }),
+    MathExtension,
+    MermaidExtension,
+    WebsiteCard,
+    EChartsExtension,
+    VideoExtension,
+    AudioExtension,
+    CalloutExtension,
+    CalendarExtension,
   ],
 })
 
