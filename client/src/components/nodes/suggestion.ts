@@ -8,6 +8,26 @@ export const getSuggestion = (context: any) => {
     items: ({ query }: { query: string }) => {
       const items = [
         {
+          title: '音乐播放器',
+          icon: Music,
+          command: ({ editor, range }: any) => {
+            editor.chain().focus().deleteRange(range).insertContent({
+              type: 'musicPlayer',
+              attrs: {
+                playlist: [
+                  {
+                    id: '1',
+                    name: '示例歌曲',
+                    artist: 'Unknown',
+                    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+                    cover: ''
+                  }
+                ]
+              }
+            }).run()
+          },
+        },
+        {
           title: '标题 1',
           icon: Heading1,
           command: ({ editor, range }: any) => {

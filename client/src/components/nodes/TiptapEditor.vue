@@ -148,6 +148,7 @@ import CalloutExtension from './CalloutExtension'
 import CalendarExtension from './CalendarExtension'
 import MermaidExtension from './MermaidExtension'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
+import MusicPlayerExtension from './MusicPlayerExtension'
 import { common, createLowlight } from 'lowlight'
 import css from 'highlight.js/lib/languages/css'
 import js from 'highlight.js/lib/languages/javascript'
@@ -487,6 +488,7 @@ const editor = useEditor({
     CalloutExtension,
     CalendarExtension,
     MermaidExtension,
+    MusicPlayerExtension,
   ],
   onUpdate: ({ editor }) => {
     // Debounce the update emit to avoid frequent re-renders in parent

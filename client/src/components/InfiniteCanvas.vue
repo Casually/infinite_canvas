@@ -137,15 +137,43 @@
 
     <!-- Node Content Preview Modal -->
     <div v-if="previewNode" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" @click.self="closePreview">
-      <div class="bg-white rounded-lg shadow-xl w-3/4 h-3/4 flex flex-col overflow-hidden">
+      <div 
+        class="bg-white shadow-xl flex flex-col overflow-hidden transition-all duration-300"
+        :class="isPreviewFullscreen ? 'fixed inset-0 w-full h-full rounded-none' : 'w-3/4 h-3/4 rounded-lg'"
+      >
         <div class="flex items-center justify-between p-4 border-b">
           <h3 class="font-bold text-lg">{{ previewNode.data.label || '无标题' }}</h3>
-          <button @click="closePreview" class="p-1 hover:bg-gray-100 rounded text-gray-500">
-            <X class="w-6 h-6" />
-          </button>
+          <div class="flex items-center gap-2">
+            <button 
+              @click="showTableOfContents = !showTableOfContents" 
+              class="p-1 hover:bg-gray-100 rounded text-gray-500"
+              :class="{ 'bg-gray-100 text-blue-600': showTableOfContents }"
+              title="目录"
+            >
+              <List class="w-5 h-5" />
+            </button>
+            <button 
+              @click="isPreviewFullscreen = !isPreviewFullscreen" 
+              class="p-1 hover:bg-gray-100 rounded text-gray-500"
+              :title="isPreviewFullscreen ? '退出全屏' : '全屏'"
+            >
+              <Minimize2 v-if="isPreviewFullscreen" class="w-5 h-5" />
+              <Maximize2 v-else class="w-5 h-5" />
+            </button>
+            <button @click="closePreview" class="p-1 hover:bg-gray-100 rounded text-gray-500">
+              <X class="w-6 h-6" />
+            </button>
+          </div>
         </div>
-        <div class="flex-1 overflow-y-auto p-4">
-           <TiptapEditor v-model="previewNode.data.content" :editable="true" />
+        <div class="flex-1 flex overflow-hidden">
+          <TableOfContents 
+            :content="previewNode.data.content" 
+            :is-open="showTableOfContents"
+            :container-ref="previewContainerRef"
+          />
+          <div ref="previewContainerRef" class="flex-1 overflow-y-auto p-4 relative">
+             <TiptapEditor v-model="previewNode.data.content" :editable="true" />
+          </div>
         </div>
       </div>
     </div>
@@ -368,9 +396,10 @@ import { v4 as uuidv4 } from 'uuid'
 import { useRefHistory } from '@vueuse/core'
 import NoteNode from './nodes/NoteNode.vue'
 import GroupNode from './nodes/GroupNode.vue'
-import { Undo, Redo, X, Copy, History, WifiOff, HelpCircle } from 'lucide-vue-next'
+import { Undo, Redo, X, Copy, History, WifiOff, HelpCircle, Maximize2, Minimize2, List } from 'lucide-vue-next'
 import { provide } from 'vue'
 import TiptapEditor from './nodes/TiptapEditor.vue'
+import TableOfContents from './ui/TableOfContents.vue'
 import DrawingModal from './modals/DrawingModal.vue'
 import MediaUploadModal from './modals/MediaUploadModal.vue'
 import LinkInputModal from './modals/LinkInputModal.vue'
@@ -871,6 +900,9 @@ commit()
 provide('saveHistory', logAndCommit)
 
 const previewNodeId = ref<string | null>(null)
+const isPreviewFullscreen = ref(false)
+const showTableOfContents = ref(true)
+const previewContainerRef = ref<HTMLElement | null>(null)
 const previewNode = computed(() => nodes.value.find(n => n.id === previewNodeId.value))
 
 const showDrawingModal = ref(false)
@@ -1665,10 +1697,12 @@ provide('maximizeChart', maximizeChart)
 
 const openPreview = (id: string) => {
   previewNodeId.value = id
+  isPreviewFullscreen.value = false
 }
 
 const closePreview = () => {
   previewNodeId.value = null
+  isPreviewFullscreen.value = false
   logAndCommit()
 }
 

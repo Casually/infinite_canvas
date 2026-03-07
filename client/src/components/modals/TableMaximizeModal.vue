@@ -107,6 +107,7 @@ import TextAlign from '@tiptap/extension-text-align'
 import Highlight from '@tiptap/extension-highlight'
 import MathExtension from '../nodes/MathExtension'
 import MermaidExtension from '../nodes/MermaidExtension'
+import MusicPlayerExtension from '../nodes/MusicPlayerExtension'
 import WebsiteCard from '../nodes/WebsiteCard'
 import EChartsExtension from '../nodes/EChartsExtension'
 import VideoExtension from '../nodes/VideoExtension'
@@ -198,6 +199,7 @@ const editor = useEditor({
     }),
     MathExtension,
     MermaidExtension,
+    MusicPlayerExtension,
     WebsiteCard,
     EChartsExtension,
     VideoExtension,

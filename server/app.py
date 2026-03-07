@@ -117,8 +117,8 @@ def token_required(f):
     def decorated(*args, **kwargs):
         token = None
         if 'Authorization' in request.headers:
-            auth_header = request.headers['Authorization']
-            if auth_header.startswith('Bearer '):
+            auth_header = request.headers.get('Authorization')
+            if auth_header and auth_header.startswith('Bearer '):
                 token = auth_header.split(" ")[1]
         
         if not token:
@@ -127,7 +127,10 @@ def token_required(f):
         try:
             data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
             current_user = User.query.get(data['user_id'])
-        except:
+            if not current_user:
+                return jsonify({'message': 'User not found!'}), 401
+        except Exception as e:
+            print(f"Token error: {e}")
             return jsonify({'message': 'Token is invalid!'}), 401
             
         return f(current_user, *args, **kwargs)
@@ -1186,6 +1189,25 @@ def upload_file(current_user):
         # Return the full URL or relative path
         file_url = f"http://localhost:5001/api/uploads/{unique_filename}"
         return jsonify({'url': file_url, 'filename': unique_filename})
+
+@app.route('/api/proxy/audio', methods=['GET'])
+def proxy_audio():
+    url = request.args.get('url')
+    if not url:
+        return jsonify({'message': 'URL is required'}), 400
+        
+    try:
+        # Simple proxy to bypass CORS for audio
+        resp = requests.get(url, stream=True)
+        excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+        headers = [(name, value) for (name, value) in resp.raw.headers.items()
+                   if name.lower() not in excluded_headers]
+        
+        from flask import Response
+        return Response(resp.content, resp.status_code, headers)
+    except Exception as e:
+        print(f"Proxy error: {e}")
+        return jsonify({'message': 'Failed to fetch audio'}), 500
 
 @app.route('/api/fetch-metadata', methods=['POST'])
 def fetch_metadata():
