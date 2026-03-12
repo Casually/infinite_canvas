@@ -111,6 +111,15 @@
         @keydown.enter="stopTitleEdit"
       />
       <div class="flex items-center space-x-1">
+        <button
+          v-if="hasAnyTimers"
+          @click.stop="openTimerManager(props.id)"
+          class="p-1 rounded transition-colors"
+          :class="hasActiveTimers ? 'text-orange-500 hover:bg-orange-50' : 'text-gray-400 hover:bg-gray-100'"
+          title="定时任务"
+        >
+          <AlarmClock class="w-4 h-4" />
+        </button>
         <button 
           @click.stop="copyToMarkdown" 
           class="p-1 text-gray-400 hover:text-blue-500 rounded transition-colors"
@@ -160,7 +169,7 @@
 import { ref, watch, onMounted, nextTick, reactive, inject, computed } from 'vue'
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core'
 import { NodeResizeControl } from '@vue-flow/node-resizer'
-import { Maximize2, ChevronUp, ChevronDown, RotateCcw, Copy } from 'lucide-vue-next'
+import { Maximize2, ChevronUp, ChevronDown, RotateCcw, Copy, AlarmClock } from 'lucide-vue-next'
 import TiptapEditor from './TiptapEditor.vue'
 import '@vue-flow/node-resizer/dist/style.css'
 
@@ -169,6 +178,7 @@ const props = defineProps<NodeProps>()
 const saveHistory = inject('saveHistory', () => {})
 const saveData = inject('saveData', () => {})
 const openPreview = inject('openPreview', (_id: string) => {})
+const openTimerManager = inject('openNodeTimerManager', (_id: string) => {})
 
 const content = ref(props.data.content || '<p></p>')
 const isCollapsed = ref(props.data.isCollapsed || false)
@@ -185,6 +195,17 @@ const hasFixedSize = computed(() => {
   if (!node || !node.style) return false
   const style = node.style as Record<string, any>
   return (style.height && style.height !== 'auto') || (style.width && style.width !== 'auto')
+})
+
+const hasActiveTimers = computed(() => {
+  const timers = (props.data as any)?.timers
+  if (!Array.isArray(timers)) return false
+  return timers.some((t: any) => t && t.enabled && t.nextTriggerAt && t.nextTriggerAt > Date.now())
+})
+
+const hasAnyTimers = computed(() => {
+  const timers = (props.data as any)?.timers
+  return Array.isArray(timers) && timers.length > 0
 })
 
 const isHovered = ref(false)

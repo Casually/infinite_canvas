@@ -28,7 +28,8 @@ describe('GroupNode Interactions', () => {
           saveHistory: vi.fn()
         },
         stubs: {
-          NodeResizer: true
+          NodeResizer: true,
+          Handle: true
         }
       }
     })
@@ -60,7 +61,8 @@ describe('GroupNode Interactions', () => {
           saveHistory: vi.fn()
         },
         stubs: {
-          NodeResizer: true
+          NodeResizer: true,
+          Handle: true
         }
       }
     })

@@ -14,9 +14,37 @@
           @keydown.enter="select"
           @keydown.esc="close"
         />
-        <div class="flex gap-1">
+        <div class="flex gap-2 items-center">
+          <button
+            class="px-2 py-1 text-xs rounded border border-gray-200 bg-white text-gray-600 hover:bg-gray-100"
+            :class="mode === 'unfinished-tasks' ? 'border-blue-300 text-blue-600 bg-blue-50' : ''"
+            @click.stop="toggleUnfinishedTasks"
+            title="查看全部未完成任务"
+          >
+            未完成任务
+          </button>
           <kbd class="hidden sm:inline-block px-2 py-0.5 bg-gray-100 border border-gray-200 rounded text-xs text-gray-500 font-sans">ESC</kbd>
         </div>
+      </div>
+
+      <div class="px-4 py-2 border-b border-gray-100 bg-white flex flex-wrap gap-2 items-center">
+        <span class="text-xs text-gray-400">筛选：</span>
+        <button
+          v-for="f in filters"
+          :key="f.id"
+          class="px-2 py-1 text-xs rounded-full border transition-colors"
+          :class="selectedFilters.has(f.id) ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
+          @click.stop="toggleFilter(f.id)"
+        >
+          {{ f.label }}
+        </button>
+        <div class="flex-1" />
+        <button
+          class="text-xs text-gray-500 hover:text-gray-700"
+          @click.stop="clearFilters"
+        >
+          清空
+        </button>
       </div>
       
       <div v-if="results.length > 0" class="overflow-y-auto py-2">
@@ -35,12 +63,14 @@
               :class="{
                 'bg-blue-100 text-blue-600': item.type === 'group-title',
                 'bg-green-100 text-green-600': item.type === 'node-title',
-                'bg-gray-100 text-gray-500': item.type === 'node-content'
+                'bg-gray-100 text-gray-500': item.type === 'node-content',
+                'bg-orange-100 text-orange-700': item.type === 'task-unchecked'
               }"
             >
               {{ 
                 item.type === 'group-title' ? '分组标题' : 
-                item.type === 'node-title' ? '节点标题' : '节点内容' 
+                item.type === 'node-title' ? '节点标题' :
+                item.type === 'task-unchecked' ? '未完成任务' : '节点内容' 
               }}
             </span>
           </div>
@@ -50,7 +80,7 @@
         </div>
       </div>
       
-      <div v-else-if="query" class="p-8 text-center text-gray-500 text-sm">
+      <div v-else-if="query || mode === 'unfinished-tasks'" class="p-8 text-center text-gray-500 text-sm">
         未找到相关节点
       </div>
       
@@ -70,7 +100,7 @@ export interface SearchResult {
   score: number
   x: number
   y: number
-  type: 'group-title' | 'node-title' | 'node-content'
+  type: 'group-title' | 'node-title' | 'node-content' | 'task-unchecked'
 }
 
 const props = defineProps<{
@@ -83,9 +113,138 @@ const emit = defineEmits(['close', 'select'])
 const query = ref('')
 const selectedIndex = ref(0)
 const searchInput = ref<HTMLInputElement>()
+const mode = ref<'search' | 'unfinished-tasks'>('search')
+
+const filters = [
+  { id: 'task', label: '任务' },
+  { id: 'code', label: '代码' },
+  { id: 'table', label: '表格' },
+  { id: 'mermaid', label: '图表' },
+  { id: 'math', label: '公式' },
+  { id: 'image', label: '图片' },
+  { id: 'link', label: '链接' },
+  { id: 'file', label: '附件' },
+  { id: 'audio', label: '音频' },
+  { id: 'video', label: '视频' },
+]
+
+const selectedFilters = ref(new Set<string>())
+
+const clearFilters = () => {
+  selectedFilters.value = new Set()
+}
+
+const toggleFilter = (id: string) => {
+  const next = new Set(selectedFilters.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedFilters.value = next
+}
+
+const toggleUnfinishedTasks = () => {
+  mode.value = mode.value === 'unfinished-tasks' ? 'search' : 'unfinished-tasks'
+  query.value = ''
+}
+
+const parseDoc = (html: string) => {
+  try {
+    const parser = new DOMParser()
+    return parser.parseFromString(html, 'text/html')
+  } catch {
+    return null
+  }
+}
+
+const getTextContent = (html: string) => {
+  const doc = parseDoc(html)
+  if (!doc) return html.replace(/<[^>]*>/g, ' ')
+  return (doc.body?.textContent || '').replace(/\s+/g, ' ').trim()
+}
+
+const getFileExt = (url: string) => {
+  const clean = url.split('?')[0]
+  const parts = clean.split('.')
+  if (parts.length < 2) return ''
+  return parts.pop()!.toLowerCase()
+}
+
+const detectBlockTypes = (html: string) => {
+  const doc = parseDoc(html)
+  const set = new Set<string>()
+  if (!doc) return set
+
+  if (doc.querySelector('pre code')) set.add('code')
+  if (doc.querySelector('table')) set.add('table')
+  if (doc.querySelector('mermaid-diagram')) set.add('mermaid')
+  if (doc.querySelector('.katex, math, mjx-container')) set.add('math')
+  if (doc.querySelector('img')) set.add('image')
+  if (doc.querySelector('audio')) set.add('audio')
+  if (doc.querySelector('video')) set.add('video')
+
+  const links = Array.from(doc.querySelectorAll('a'))
+  if (links.length > 0) set.add('link')
+  const fileExts = new Set(['pdf', 'xlsx', 'xls', 'docx', 'ppt', 'pptx'])
+  if (links.some(a => fileExts.has(getFileExt((a.getAttribute('href') || ''))))) set.add('file')
+
+  const taskNodes = doc.querySelectorAll('input[type="checkbox"], li[data-checked]')
+  if (taskNodes.length > 0) set.add('task')
+
+  return set
+}
+
+const extractUnfinishedTasks = (html: string) => {
+  const doc = parseDoc(html)
+  if (!doc) return [] as string[]
+
+  const tasks: string[] = []
+
+  const liNodes = Array.from(doc.querySelectorAll('li'))
+  liNodes.forEach(li => {
+    const checkedAttr = li.getAttribute('data-checked')
+    const checkbox = li.querySelector('input[type="checkbox"]') as HTMLInputElement | null
+    const checked = checkedAttr ? checkedAttr === 'true' : (checkbox ? checkbox.checked : null)
+    if (checked === false) {
+      const text = (li.textContent || '').replace(/\s+/g, ' ').trim()
+      if (text) tasks.push(text)
+    }
+  })
+
+  if (tasks.length > 0) return tasks
+
+  const inputs = Array.from(doc.querySelectorAll('input[type="checkbox"]')) as HTMLInputElement[]
+  inputs.forEach(input => {
+    if (!input.checked) {
+      const li = input.closest('li')
+      const text = (li?.textContent || '').replace(/\s+/g, ' ').trim()
+      if (text) tasks.push(text)
+    }
+  })
+
+  return tasks
+}
 
 // Simple search implementation
 const results = computed(() => {
+  if (mode.value === 'unfinished-tasks') {
+    const taskResults: SearchResult[] = []
+    props.nodes.forEach(node => {
+      if (node.type !== 'note' || !node.data?.content) return
+      const tasks = extractUnfinishedTasks(node.data.content)
+      if (tasks.length === 0) return
+      tasks.forEach(task => {
+        taskResults.push({
+          id: node.id,
+          content: task,
+          score: 1,
+          x: node.position.x,
+          y: node.position.y,
+          type: 'task-unchecked'
+        })
+      })
+    })
+    return taskResults.slice(0, 50)
+  }
+
   if (!query.value.trim()) return []
   
   const q = query.value.toLowerCase()
@@ -113,8 +272,14 @@ const results = computed(() => {
     
     // 2. Search in Content (for notes)
     if (node.type === 'note' && node.data?.content) {
+      const types = detectBlockTypes(node.data.content)
+      if (selectedFilters.value.size > 0) {
+        const ok = Array.from(selectedFilters.value).every(t => types.has(t))
+        if (!ok) return
+      }
+
       const rawContent = node.data.content
-      const textContent = rawContent.replace(/<[^>]*>/g, ' ')
+      const textContent = getTextContent(rawContent)
       const lowerContent = textContent.toLowerCase()
       
       if (lowerContent.includes(q)) {
@@ -151,6 +316,8 @@ watch(() => props.visible, (val) => {
   if (val) {
     query.value = ''
     selectedIndex.value = 0
+    mode.value = 'search'
+    clearFilters()
     nextTick(() => {
       searchInput.value?.focus()
     })

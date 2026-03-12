@@ -70,6 +70,19 @@ export const getSuggestion = (context: any) => {
           },
         },
         {
+          title: '分栏',
+          icon: Table,
+          command: ({ editor, range }: any) => {
+            editor.chain().focus().deleteRange(range).insertContent({
+              type: 'columns',
+              content: [
+                { type: 'column', content: [{ type: 'paragraph' }] },
+                { type: 'column', content: [{ type: 'paragraph' }] },
+              ]
+            }).run()
+          },
+        },
+        {
           title: '分割线',
           icon: Minus,
           command: ({ editor, range }: any) => {

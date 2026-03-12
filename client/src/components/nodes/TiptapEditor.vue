@@ -142,7 +142,7 @@ import TaskList from '@tiptap/extension-task-list'
 import CustomTaskItem from './CustomTaskItem'
 import { Table, TableRow, TableHeader, CustomTableCell } from './TableExtensions'
 import TableNodeComponent from './TableNode.vue'
-import Image from '@tiptap/extension-image'
+import ResizableImage from './ResizableImage'
 import Link from '@tiptap/extension-link'
 import TextAlign from '@tiptap/extension-text-align'
 import { watch, onBeforeUnmount, inject, ref } from 'vue'
@@ -159,6 +159,7 @@ import CalendarExtension from './CalendarExtension'
 import MermaidExtension from './MermaidExtension'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import MusicPlayerExtension from './MusicPlayerExtension'
+import ColumnsExtension, { Column } from './ColumnsExtension'
 import { common, createLowlight } from 'lowlight'
 import css from 'highlight.js/lib/languages/css'
 import js from 'highlight.js/lib/languages/javascript'
@@ -473,10 +474,12 @@ const editor = useEditor({
     TableRow,
     TableHeader,
     CustomTableCell,
+    ColumnsExtension,
+    Column,
     TextAlign.configure({
       types: ['heading', 'paragraph', 'tableCell', 'tableHeader'],
     }),
-    Image.configure({
+    ResizableImage.configure({
       inline: true,
       allowBase64: true,
     }),

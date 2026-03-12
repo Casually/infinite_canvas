@@ -59,6 +59,13 @@
         <button @click="openShareForSelection" class="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center">
            分享...
         </button>
+        <button
+          v-if="selectedNodes.length <= 1"
+          @click="openTimersForSelection"
+          class="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center"
+        >
+          定时任务...
+        </button>
         <div class="border-t my-1"></div>
 
         <div v-if="selectedNodes.length > 1">
@@ -247,6 +254,20 @@
       @close="showSearch = false"
       @select="handleSearchResult"
     />
+
+    <AlarmNotifications
+      :notifications="alarmNotifications"
+      @close="closeAlarmNotification"
+      @locate="focusNodeById"
+    />
+
+    <NodeTimerManagerModal
+      v-if="showNodeTimerModal && activeTimerNode"
+      :node-id="activeTimerNode.id"
+      :node-title="activeTimerNode.data?.label"
+      v-model="activeTimerNodeTimers"
+      @close="showNodeTimerModal = false"
+    />
     
     <!-- Canvas Title -->
     <div class="absolute top-4 left-4 z-10 bg-white rounded-md shadow border px-3 py-2 flex items-center gap-2">
@@ -411,6 +432,7 @@ import ChangePasswordModal from './modals/ChangePasswordModal.vue'
 import TechSupportModal from './modals/TechSupportModal.vue'
 import ShortcutSettingsModal from './modals/ShortcutSettingsModal.vue'
 import SearchBar from './ui/SearchBar.vue'
+import AlarmNotifications, { type AlarmNotification } from './ui/AlarmNotifications.vue'
 import UserMenu from './ui/UserMenu.vue'
 import ActiveUsers from './ActiveUsers.vue'
 import CanvasManagerModal from './modals/CanvasManagerModal.vue'
@@ -419,9 +441,11 @@ import NodeShareModal from './modals/NodeShareModal.vue'
 import ShareManagerModal from './modals/ShareManagerModal.vue'
 import HistoryModal from './modals/HistoryModal.vue'
 import PasswordModal from './modals/PasswordModal.vue'
+import NodeTimerManagerModal, { type NodeTimer } from './modals/NodeTimerManagerModal.vue'
 import CanvasConflictResolver from './modals/CanvasConflictResolver.vue'
 import { io, type Socket } from 'socket.io-client'
 import { useShortcuts } from '../composables/useShortcuts'
+import { nextCronTimestamp } from '../utils/cron'
 
 const { matchShortcut } = useShortcuts()
 
@@ -786,6 +810,7 @@ const loadCanvas = async (id: string, password?: string) => {
           edges.value = localContent.edges || []
           if (localContent.viewport) setViewport(localContent.viewport)
           triggerRef(nodes)
+          initializeTimersForNodes()
           isOfflineMode.value = true // Temporarily mark as offline/local until resolved
           return
        }
@@ -800,6 +825,7 @@ const loadCanvas = async (id: string, password?: string) => {
     }
       
     triggerRef(nodes)
+    initializeTimersForNodes()
     logAndCommit() 
     isOfflineMode.value = false
 
@@ -824,6 +850,7 @@ const loadCanvas = async (id: string, password?: string) => {
       canvasTitle.value = cached.title || '未命名画布'
       
       triggerRef(nodes)
+      initializeTimersForNodes()
       logAndCommit()
       
       isOfflineMode.value = true
@@ -951,6 +978,219 @@ const echartsCallback = ref<((data: any) => void) | null>(null)
 const echartsInitialData = ref<any>(undefined)
 const echartsInitialType = ref<string | undefined>(undefined)
 const echartsReadonly = ref(false)
+
+const alarmNotifications = ref<AlarmNotification[]>([])
+const closeAlarmNotification = (id: string) => {
+  alarmNotifications.value = alarmNotifications.value.filter(n => n.id !== id)
+}
+
+const focusNodeById = (id: string) => {
+  if (vueFlowInstance.value) {
+    vueFlowInstance.value.fitView({ nodes: [id], duration: 800, padding: 0.2 })
+  }
+  nodes.value = nodes.value.map(n => ({
+    ...n,
+    selected: n.id === id
+  }))
+}
+
+const showNodeTimerModal = ref(false)
+const activeTimerNodeId = ref<string | null>(null)
+const activeTimerNode = computed(() => nodes.value.find(n => n.id === activeTimerNodeId.value) as any)
+const activeTimerNodeTimers = computed<NodeTimer[]>({
+  get: () => {
+    const n: any = activeTimerNode.value
+    const timers = n?.data?.timers
+    return Array.isArray(timers) ? timers : []
+  },
+  set: (val) => {
+    if (!activeTimerNodeId.value) return
+    updateNodeTimers(activeTimerNodeId.value, val)
+  }
+})
+
+const openNodeTimerManager = (id: string) => {
+  activeTimerNodeId.value = id
+  showNodeTimerModal.value = true
+}
+
+provide('openNodeTimerManager', openNodeTimerManager)
+
+const openTimersForSelection = () => {
+  let id: string | null = null
+  if (selectedNodes.value.length > 0) id = selectedNodes.value[0].id
+  else if (menu.contextNodeId) id = menu.contextNodeId
+  if (id) openNodeTimerManager(id)
+  closeMenu()
+}
+
+type TimerKey = string
+const timerTimeouts = new Map<TimerKey, number>()
+const MAX_TIMEOUT_MS = 2147483647
+
+const getTimerKey = (nodeId: string, timerId: string) => `${nodeId}:${timerId}`
+
+const clearTimerKey = (key: TimerKey) => {
+  const handle = timerTimeouts.get(key)
+  if (handle) {
+    clearTimeout(handle)
+    timerTimeouts.delete(key)
+  }
+}
+
+const cancelTimersForNode = (nodeId: string) => {
+  Array.from(timerTimeouts.keys()).forEach(key => {
+    if (key.startsWith(`${nodeId}:`)) clearTimerKey(key)
+  })
+}
+
+const scheduleAt = (key: TimerKey, targetAt: number, cb: () => void) => {
+  const tick = () => {
+    const now = Date.now()
+    const remaining = targetAt - now
+    if (remaining <= 0) {
+      cb()
+      return
+    }
+    const step = Math.min(remaining, MAX_TIMEOUT_MS)
+    const handle = window.setTimeout(tick, step)
+    timerTimeouts.set(key, handle)
+  }
+  tick()
+}
+
+const scheduleNodeTimers = (nodeId: string) => {
+  cancelTimersForNode(nodeId)
+  const n: any = nodes.value.find(x => x.id === nodeId)
+  const timers: NodeTimer[] = Array.isArray(n?.data?.timers) ? n.data.timers : []
+  const now = Date.now()
+
+  timers.forEach(t => {
+    if (!t || !t.enabled) return
+    if (t.mode === 'cron') {
+      const expr = t.cron?.trim()
+      if (!expr) return
+      const fromTs = t.lastRun ? t.lastRun + 1000 : now
+      const nextAt = nextCronTimestamp(expr, fromTs)
+      if (!nextAt) return
+      const key = getTimerKey(nodeId, t.id)
+      scheduleAt(key, nextAt, () => fireTimer(nodeId, t.id))
+      return
+    }
+
+    if (!t.nextTriggerAt || Number.isNaN(t.nextTriggerAt)) return
+
+    if (t.mode !== 'interval' && t.nextTriggerAt <= now) return
+
+    if (t.mode === 'interval' && t.intervalMs) {
+      let nextAt = t.nextTriggerAt
+      if (!nextAt) nextAt = now + t.intervalMs
+      while (nextAt <= now) nextAt += t.intervalMs
+      t.nextTriggerAt = nextAt
+    }
+
+    const key = getTimerKey(nodeId, t.id)
+    scheduleAt(key, t.nextTriggerAt, () => fireTimer(nodeId, t.id))
+  })
+}
+
+const initializeTimersForNodes = () => {
+  nodes.value.forEach(n => scheduleNodeTimers(n.id))
+}
+
+const updateNodeTimers = (nodeId: string, timers: NodeTimer[]) => {
+  nodes.value = nodes.value.map(n => {
+    if (n.id !== nodeId) return n
+    return {
+      ...n,
+      data: {
+        ...(n as any).data,
+        timers
+      }
+    } as any
+  })
+  scheduleNodeTimers(nodeId)
+  logAndCommit()
+}
+
+const fireTimer = (nodeId: string, timerId: string) => {
+  const nodeIndex = nodes.value.findIndex(n => n.id === nodeId)
+  if (nodeIndex === -1) return
+
+  const n: any = nodes.value[nodeIndex]
+  const timers: NodeTimer[] = Array.isArray(n.data?.timers) ? n.data.timers : []
+  const idx = timers.findIndex(t => t.id === timerId)
+  if (idx === -1) return
+
+  const t = { ...timers[idx] }
+  const now = Date.now()
+  if (t.lastRun && now - t.lastRun < 500) {
+    return
+  }
+  t.lastRun = now
+
+  alarmNotifications.value = [
+    {
+      id: crypto.randomUUID(),
+      nodeId,
+      title: n.data?.label || '节点提醒',
+      message: t.title || '定时提醒',
+      triggeredAt: now,
+    },
+    ...alarmNotifications.value
+  ]
+
+  try {
+    if ('Notification' in window) {
+      if (Notification.permission === 'granted') {
+        new Notification(n.data?.label || '节点提醒', {
+          body: t.title || '定时提醒',
+          icon: '/favicon.ico',
+        })
+      } else if (Notification.permission === 'default') {
+        Notification.requestPermission().then(p => {
+          if (p === 'granted') {
+            new Notification(n.data?.label || '节点提醒', {
+              body: t.title || '定时提醒',
+              icon: '/favicon.ico',
+            })
+          }
+        })
+      }
+    }
+  } catch {}
+
+  if (t.mode === 'interval') {
+    if (t.autoClose) {
+      t.enabled = false
+    } else if (t.intervalMs) {
+      t.nextTriggerAt = now + t.intervalMs
+    } else {
+      t.enabled = false
+    }
+  } else if (t.mode === 'cron') {
+    if (t.autoClose) {
+      t.enabled = false
+    } else {
+      const expr = t.cron?.trim()
+      if (!expr) {
+        t.enabled = false
+      } else {
+        const nextAt = nextCronTimestamp(expr, now + 1000)
+        if (!nextAt) {
+          t.enabled = false
+        } else {
+          t.nextTriggerAt = nextAt
+        }
+      }
+    }
+  } else {
+    t.enabled = false
+  }
+
+  const nextTimers = timers.map((x, i) => (i === idx ? t : x))
+  updateNodeTimers(nodeId, nextTimers)
+}
 
 const checkAuth = async () => {
   const token = localStorage.getItem('token')
@@ -1421,6 +1661,7 @@ const loadFromServer = async () => {
          edges.value = parsed.edges || []
          if (parsed.viewport) setViewport(parsed.viewport)
          triggerRef(nodes)
+         initializeTimersForNodes()
          logAndCommit()
       }
     }
@@ -1533,6 +1774,7 @@ const loadSharedContent = async (shareId: string, password?: string) => {
       }
       
       triggerRef(nodes)
+      initializeTimersForNodes()
     }
     
     isSharedView.value = true
@@ -2099,6 +2341,7 @@ const addNote = () => {
 }
 
 const performDelete = (nodesToDelete: Set<string>, edgesToDelete: Set<string>) => {
+  nodesToDelete.forEach(id => cancelTimersForNode(id))
   nodes.value = nodes.value.filter(n => !nodesToDelete.has(n.id))
   edges.value = edges.value.filter(e => !edgesToDelete.has(e.id) && !nodesToDelete.has(e.source) && !nodesToDelete.has(e.target))
   
