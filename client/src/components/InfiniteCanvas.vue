@@ -688,6 +688,18 @@ const handleCanvasSelect = async (id: string) => {
 }
 
 const loadCanvas = async (id: string, password?: string) => {
+  const normalizeNodes = (inputNodes: any[]) => {
+    return (inputNodes || []).map((n: any) => {
+      if (n?.type === 'group') {
+        const style = (n.style || {}) as any
+        if (style.zIndex === -1) {
+          return { ...n, style: { ...style, zIndex: 0 } }
+        }
+      }
+      return n
+    })
+  }
+
   try {
     const headers: Record<string, string> = {}
     if (user.value) {
@@ -770,7 +782,7 @@ const loadCanvas = async (id: string, password?: string) => {
           showConflictResolver.value = true
           
           // Show Local Data initially while resolving
-          nodes.value = localContent.nodes || []
+          nodes.value = normalizeNodes(localContent.nodes || [])
           edges.value = localContent.edges || []
           if (localContent.viewport) setViewport(localContent.viewport)
           triggerRef(nodes)
@@ -780,7 +792,7 @@ const loadCanvas = async (id: string, password?: string) => {
     }
 
     // No conflict, use Server Data
-    nodes.value = serverContent.nodes || []
+    nodes.value = normalizeNodes(serverContent.nodes || [])
     edges.value = serverContent.edges || []
       
     if (serverContent.viewport) {
@@ -802,7 +814,7 @@ const loadCanvas = async (id: string, password?: string) => {
     const cached = loadFromLocalCache(id)
     if (cached && cached.content) {
       const parsed = cached.content
-      nodes.value = parsed.nodes || []
+      nodes.value = normalizeNodes(parsed.nodes || [])
       edges.value = parsed.edges || []
       
       if (parsed.viewport) {
@@ -2174,7 +2186,7 @@ const groupNodes = () => {
       id: groupId,
       type: 'group',
       position: { x: minX, y: minY },
-      style: { width: `${maxX - minX}px`, height: `${maxY - minY}px`, zIndex: -1 },
+      style: { width: `${maxX - minX}px`, height: `${maxY - minY}px`, zIndex: 0 },
       data: { label: '新建分组' },
     }
     

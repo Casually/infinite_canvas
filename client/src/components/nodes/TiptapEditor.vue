@@ -2,6 +2,8 @@
   <div class="tiptap-editor relative" @click="handleEditorClick" @contextmenu.prevent.stop="handleContextMenu">
     <editor-content :editor="editor" class="prose prose-sm max-w-none focus:outline-none" />
     
+    <DragHandle v-if="editor && editable" :editor="editor" />
+
     <bubble-menu
       v-if="editor"
       :editor="editor"
@@ -85,6 +87,14 @@
         v-if="previewSrc" 
         :src="previewSrc" 
         @close="previewSrc = ''" 
+      />
+      
+      <FilePreviewModal
+        v-if="showFilePreview"
+        :show="showFilePreview"
+        :url="previewFile.url"
+        :name="previewFile.name"
+        @close="showFilePreview = false"
       />
       
       <TableMaximizeModal
@@ -193,8 +203,11 @@ lowlight.register('yaml', yaml)
 
 import CodeBlockComponent from './CodeBlockComponent.vue'
 import { uploadFile } from '../../utils/upload'
+import { DOMSerializer } from '@tiptap/pm/model'
 import ImagePreview from '../ImagePreview.vue'
+import FilePreviewModal from '../ui/FilePreviewModal.vue'
 import TableMaximizeModal from '../modals/TableMaximizeModal.vue'
+import DragHandle from '../ui/DragHandle.vue'
 import { Maximize2, ArrowLeftToLine, ArrowRightToLine, Trash2, ArrowUpToLine, ArrowDownToLine, Merge, Split, PaintBucket, AlignLeft, AlignCenter, AlignRight } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -215,6 +228,8 @@ const openWebsiteCardModal = inject('openWebsiteCardModal') as (callback: (data:
 const openEChartsModal = inject('openEChartsModal') as (callback: (option: any) => void, initialData?: any, type?: string) => void
 
 const previewSrc = ref('')
+const previewFile = ref<{ url: string, name: string }>({ url: '', name: '' })
+const showFilePreview = ref(false)
 const showTableMaximizeModal = ref(false)
 const showColorPicker = ref(false)
 const editingTablePos = ref<number | null>(null)
@@ -297,8 +312,23 @@ const handleEditorClick = (e: MouseEvent) => {
   }
   
   // Handle Links (Attachments are also links)
-  const link = target.closest('a')
+  const link = (target as HTMLElement).closest('a')
   if (link) {
+    const href = link.getAttribute('href')
+    if (href) {
+      const parts = href.split('?')[0].split('.')
+      if (parts.length > 1) {
+        const ext = parts.pop()?.toLowerCase()
+        if (ext && ['pdf', 'xlsx', 'xls', 'docx', 'ppt', 'pptx'].includes(ext)) {
+          e.preventDefault()
+          e.stopPropagation()
+          previewFile.value = { url: href, name: (link as HTMLElement).innerText || '' }
+          showFilePreview.value = true
+          return
+        }
+      }
+    }
+
      if (!props.editable || (props.editable && e.altKey)) {
         window.open(link.href, '_blank')
         e.preventDefault()
@@ -514,6 +544,24 @@ const editor = useEditor({
     attributes: {
       class: 'focus:outline-none min-h-[100px]',
     },
+    handleDOMEvents: {
+      dragstart: (view, event) => {
+        const e = event as DragEvent
+        if (!e.dataTransfer) return false
+        const sel = view.state.selection
+        if (sel.empty) return false
+        const slice = sel.content()
+        const serializer = DOMSerializer.fromSchema(view.state.schema)
+        const div = document.createElement('div')
+        div.appendChild(serializer.serializeFragment(slice.content))
+        const html = div.innerHTML
+        if (!html) return false
+        e.dataTransfer.setData('application/x-icanvas-html', html)
+        e.dataTransfer.setData('text/html', html)
+        e.dataTransfer.effectAllowed = 'copy'
+        return false
+      },
+    },
     handlePaste: (view, event) => {
       const item = event.clipboardData?.items[0]
       if (item) {
@@ -598,6 +646,14 @@ const editor = useEditor({
           }).catch(console.error)
           return true
         }
+      }
+      const html = event.dataTransfer?.getData('application/x-icanvas-html') || event.dataTransfer?.getData('text/html')
+      if (html) {
+        const coordinates = view.posAtCoords({ left: event.clientX, top: event.clientY })
+        if (!coordinates) return false
+        event.preventDefault()
+        editor.value?.chain().focus().insertContentAt(coordinates.pos, html).run()
+        return true
       }
       return false
     }

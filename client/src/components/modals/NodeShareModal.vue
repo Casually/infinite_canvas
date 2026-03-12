@@ -26,24 +26,42 @@
           
           <!-- Node List -->
           <div class="border rounded-md flex-1 overflow-y-auto h-[300px] mb-4">
-            <div v-if="filteredNodes.length === 0" class="p-4 text-center text-gray-500 text-sm">
+            <div v-if="visibleItems.length === 0" class="p-4 text-center text-gray-500 text-sm">
               没有找到匹配的节点
             </div>
             <div 
-              v-for="node in filteredNodes" 
-              :key="node.id"
-              class="flex items-center p-3 hover:bg-gray-50 border-b last:border-b-0 cursor-pointer"
-              @click="toggleNode(node.id)"
+              v-for="item in visibleItems" 
+              :key="item.id"
+              class="flex items-center px-3 py-2 hover:bg-gray-50 border-b last:border-b-0 cursor-pointer select-none"
+              @click="toggleItem(item)"
             >
+              <button
+                v-if="item.isGroup"
+                class="w-5 h-5 flex items-center justify-center text-gray-400 hover:text-gray-700"
+                :style="{ marginLeft: `${item.depth * 14}px` }"
+                @click.stop="toggleExpand(item.id)"
+              >
+                <span v-if="expandedIds.has(item.id)">▾</span>
+                <span v-else>▸</span>
+              </button>
+              <div
+                v-else
+                class="w-5 h-5"
+                :style="{ marginLeft: `${item.depth * 14}px` }"
+              />
               <input 
                 type="checkbox" 
-                :checked="selectedNodeIds.has(node.id)"
+                :checked="isChecked(item.id)"
+                :indeterminate.prop="isIndeterminate(item.id)"
                 class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded mr-3"
                 readonly
               />
               <div class="flex-1 truncate">
-                <div class="text-sm font-medium text-gray-900">{{ getNodeLabel(node) }}</div>
-                <div class="text-xs text-gray-500">ID: {{ node.id }} | Type: {{ node.type }}</div>
+                <div class="text-sm font-medium text-gray-900 flex items-center gap-2">
+                  <span class="truncate">{{ item.label }}</span>
+                  <span v-if="item.isGroup" class="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded">组</span>
+                </div>
+                <div class="text-xs text-gray-500 font-mono truncate">ID: {{ item.id }}</div>
               </div>
             </div>
           </div>
@@ -170,13 +188,109 @@ const settings = reactive({
   password: ''
 })
 
-const filteredNodes = computed(() => {
-  if (!searchQuery.value) return props.nodes
-  const query = searchQuery.value.toLowerCase()
-  return props.nodes.filter(node => {
-    const label = getNodeLabel(node).toLowerCase()
-    return label.includes(query)
+type FlatItem = {
+  id: string
+  label: string
+  isGroup: boolean
+  depth: number
+  children: string[]
+}
+
+const nodeById = computed(() => {
+  const map = new Map<string, any>()
+  props.nodes.forEach(n => {
+    if (n?.id) map.set(n.id, n)
   })
+  return map
+})
+
+const childrenMap = computed(() => {
+  const map = new Map<string, string[]>()
+  props.nodes.forEach(n => {
+    const parent = n?.parentNode
+    if (!parent) return
+    if (!map.has(parent)) map.set(parent, [])
+    map.get(parent)!.push(n.id)
+  })
+  return map
+})
+
+const rootGroupIds = computed(() => {
+  const groups = props.nodes.filter(n => n?.type === 'group')
+  return groups
+    .filter(g => !g.parentNode || nodeById.value.get(g.parentNode)?.type !== 'group')
+    .map(g => g.id)
+})
+
+const rootNodeIds = computed(() => {
+  return props.nodes
+    .filter(n => n?.type !== 'group' && !n.parentNode)
+    .map(n => n.id)
+})
+
+const expandedIds = reactive(new Set<string>(rootGroupIds.value))
+
+const getChildren = (id: string) => {
+  return childrenMap.value.get(id) || []
+}
+
+const getLabel = (id: string) => {
+  const n = nodeById.value.get(id)
+  return getNodeLabel(n)
+}
+
+const isGroup = (id: string) => {
+  const n = nodeById.value.get(id)
+  return n?.type === 'group'
+}
+
+const matchesQuery = (id: string, query: string) => {
+  if (!query) return true
+  return (getLabel(id) || '').toLowerCase().includes(query)
+}
+
+const hasMatchingDescendant = (id: string, query: string) => {
+  const stack = [...getChildren(id)]
+  while (stack.length) {
+    const cur = stack.pop()!
+    if (matchesQuery(cur, query)) return true
+    stack.push(...getChildren(cur))
+  }
+  return false
+}
+
+const flatten = (id: string, depth: number, query: string, out: FlatItem[]) => {
+  const label = getLabel(id)
+  const group = isGroup(id)
+  const children = getChildren(id)
+
+  const shouldShow = query ? (matchesQuery(id, query) || hasMatchingDescendant(id, query)) : true
+  if (!shouldShow) return
+
+  out.push({ id, label, isGroup: group, depth, children })
+
+  const shouldExpand = group && (expandedIds.has(id) || (query && hasMatchingDescendant(id, query)))
+  if (shouldExpand) {
+    children.forEach(childId => flatten(childId, depth + 1, query, out))
+  }
+}
+
+const visibleItems = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase()
+  const out: FlatItem[] = []
+  rootGroupIds.value.forEach(id => flatten(id, 0, query, out))
+
+  const rootUngrouped: FlatItem[] = []
+  rootNodeIds.value.forEach(id => {
+    if (query && !matchesQuery(id, query)) return
+    rootUngrouped.push({ id, label: getLabel(id), isGroup: false, depth: 0, children: [] })
+  })
+
+  if (rootUngrouped.length > 0) {
+    out.push(...rootUngrouped)
+  }
+
+  return out
 })
 
 function getNodeLabel(node: any): string {
@@ -186,16 +300,48 @@ function getNodeLabel(node: any): string {
   return '未命名节点'
 }
 
-function toggleNode(id: string) {
-  if (selectedNodeIds.has(id)) {
-    selectedNodeIds.delete(id)
+const getDescendantsIncludingSelf = (id: string) => {
+  const ids: string[] = [id]
+  const stack = [...getChildren(id)]
+  while (stack.length) {
+    const cur = stack.pop()!
+    ids.push(cur)
+    stack.push(...getChildren(cur))
+  }
+  return ids
+}
+
+const isChecked = (id: string) => {
+  return selectedNodeIds.has(id)
+}
+
+const isIndeterminate = (id: string) => {
+  if (!isGroup(id)) return false
+  const ids = getDescendantsIncludingSelf(id)
+  const selectedCount = ids.filter(x => selectedNodeIds.has(x)).length
+  return selectedCount > 0 && selectedCount < ids.length
+}
+
+const toggleItem = (item: FlatItem) => {
+  const ids = item.isGroup ? getDescendantsIncludingSelf(item.id) : [item.id]
+  const allSelected = ids.every(x => selectedNodeIds.has(x))
+  if (allSelected) {
+    ids.forEach(x => selectedNodeIds.delete(x))
   } else {
-    selectedNodeIds.add(id)
+    ids.forEach(x => selectedNodeIds.add(x))
   }
 }
 
+const toggleExpand = (id: string) => {
+  if (expandedIds.has(id)) expandedIds.delete(id)
+  else expandedIds.add(id)
+}
+
 function selectAll() {
-  filteredNodes.value.forEach(node => selectedNodeIds.add(node.id))
+  visibleItems.value.forEach(item => {
+    const ids = item.isGroup ? getDescendantsIncludingSelf(item.id) : [item.id]
+    ids.forEach(x => selectedNodeIds.add(x))
+  })
 }
 
 function deselectAll() {
@@ -232,6 +378,14 @@ async function createShare() {
         link: `${baseUrl}?shareId=${data.id}`
       }
       addToast('分享链接已生成', 'success')
+      try {
+        await navigator.clipboard.writeText(shareResult.value.link)
+        copied.value = true
+        addToast('链接已复制到剪贴板', 'success')
+        setTimeout(() => copied.value = false, 2000)
+      } catch {
+        copied.value = false
+      }
     } else {
       addToast(data.message || '创建分享失败', 'error')
     }

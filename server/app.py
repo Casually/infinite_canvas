@@ -152,6 +152,76 @@ def get_current_user_optional():
             pass
     return None
 
+def decode_canvas_content(content: str):
+    if not content:
+        return {"nodes": [], "edges": [], "viewport": {"x": 0, "y": 0, "zoom": 1}}, False
+    if content.startswith("GZIP:"):
+        base64_data = content[5:]
+        try:
+            compressed = base64.b64decode(base64_data)
+            decompressed = gzip.decompress(compressed)
+            return json.loads(decompressed.decode("utf-8")), True
+        except Exception:
+            try:
+                compressed = base64.b64decode(base64_data)
+                with gzip.GzipFile(fileobj=io.BytesIO(compressed), mode="rb") as gz:
+                    return json.loads(gz.read().decode("utf-8")), True
+            except Exception as e:
+                raise e
+    return json.loads(content), False
+
+def encode_canvas_content(payload, compress: bool):
+    if not compress:
+        return json.dumps(payload)
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    compressed = gzip.compress(raw)
+    base64_data = base64.b64encode(compressed).decode("utf-8")
+    return "GZIP:" + base64_data
+
+def decode_incoming_content(content: str = None, compressed_content: str = None):
+    if compressed_content:
+        compressed = base64.b64decode(compressed_content)
+        decompressed = gzip.decompress(compressed)
+        return json.loads(decompressed.decode("utf-8")), True
+    if content:
+        return json.loads(content), False
+    return None, False
+
+def expand_share_node_ids(nodes, initial_ids):
+    node_by_id = {}
+    children_map = {}
+    for n in nodes:
+        nid = n.get("id")
+        if not nid:
+            continue
+        node_by_id[nid] = n
+        parent = n.get("parentNode")
+        if parent:
+            children_map.setdefault(parent, []).append(nid)
+
+    expanded = set([i for i in initial_ids if i in node_by_id])
+
+    stack = list(expanded)
+    while stack:
+        cur = stack.pop()
+        for child_id in children_map.get(cur, []):
+            if child_id not in expanded:
+                expanded.add(child_id)
+                stack.append(child_id)
+
+    stack = list(expanded)
+    while stack:
+        cur = stack.pop()
+        node = node_by_id.get(cur)
+        if not node:
+            continue
+        parent = node.get("parentNode")
+        if parent and parent in node_by_id and parent not in expanded:
+            expanded.add(parent)
+            stack.append(parent)
+
+    return expanded
+
 # Routes
 @app.route('/api/send-code', methods=['POST'])
 def send_code():
@@ -662,6 +732,13 @@ def create_share(current_user):
     if settings.get('password'):
         settings['password_hash'] = generate_password_hash(settings['password'])
         del settings['password'] # Don't store plain text
+
+    try:
+        full_content, _ = decode_canvas_content(canvas.content)
+        expanded_ids = expand_share_node_ids(full_content.get('nodes', []), node_ids)
+        node_ids = list(expanded_ids)
+    except Exception:
+        pass
         
     new_share = SharedContent(
         canvas_id=canvas_id,
@@ -832,7 +909,7 @@ def get_share(share_id):
          return jsonify({'message': '原画布已不存在'}), 404
          
     try:
-        full_content = json.loads(canvas.content)
+        full_content, _ = decode_canvas_content(canvas.content)
         target_node_ids = set(json.loads(share.node_ids))
         
         filtered_nodes = [n for n in full_content.get('nodes', []) if n.get('id') in target_node_ids]
@@ -876,7 +953,9 @@ def update_share(share_id):
 
     data = request.get_json()
     content = data.get('content')
-    if not content:
+    compressed_content = data.get('compressed_content')
+    incoming_content, _ = decode_incoming_content(content, compressed_content)
+    if incoming_content is None:
         return jsonify({'message': '内容不能为空'}), 400
         
     try:
@@ -886,11 +965,10 @@ def update_share(share_id):
             return jsonify({'message': '原画布已不存在'}), 404
             
         # Parse contents
-        incoming_content = json.loads(content)
         incoming_nodes = incoming_content.get('nodes', [])
         incoming_edges = incoming_content.get('edges', [])
         
-        full_content = json.loads(canvas.content)
+        full_content, was_compressed = decode_canvas_content(canvas.content)
         full_nodes = full_content.get('nodes', [])
         full_edges = full_content.get('edges', [])
         
@@ -978,7 +1056,7 @@ def update_share(share_id):
             'viewport': full_content.get('viewport') # Preserve original viewport? Or update? Maybe preserve.
         }
         
-        canvas.content = json.dumps(new_full_content)
+        canvas.content = encode_canvas_content(new_full_content, was_compressed)
         canvas.updated_at = datetime.datetime.utcnow()
         
         # Update Share Node IDs
@@ -988,11 +1066,15 @@ def update_share(share_id):
         
         # Broadcast
         socket_id = data.get('socket_id')
-        socketio.emit('canvas_updated', {
-            'content': json.dumps(new_full_content),
+        emit_data = {
             'canvas_id': share.canvas_id,
             'sender_id': socket_id
-        }, room=share.canvas_id)
+        }
+        if was_compressed:
+            emit_data['compressed_content'] = canvas.content[5:]
+        else:
+            emit_data['content'] = json.dumps(new_full_content)
+        socketio.emit('canvas_updated', emit_data, room=share.canvas_id)
         
         return jsonify({'message': '保存成功'})
         
