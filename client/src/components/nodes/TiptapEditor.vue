@@ -96,6 +96,32 @@
         :name="previewFile.name"
         @close="showFilePreview = false"
       />
+
+      <div
+        v-if="showMentionPopover"
+        class="fixed inset-0 z-[9998]"
+        @click="closeMentionPopover"
+      />
+      <div
+        v-if="showMentionPopover && mentionPopoverUser"
+        class="fixed z-[9999] bg-white border border-gray-200 rounded-lg shadow-xl p-4 w-[260px]"
+        :style="{ left: mentionPopoverPos.x + 'px', top: mentionPopoverPos.y + 'px' }"
+        @click.stop
+      >
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-full overflow-hidden bg-gray-100 flex items-center justify-center text-sm font-bold text-gray-600">
+            <img v-if="mentionPopoverUser.avatar" :src="fullAvatarUrl(mentionPopoverUser.avatar)" class="w-full h-full object-cover" />
+            <span v-else>{{ (mentionPopoverUser.username || '?').charAt(0).toUpperCase() }}</span>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm font-bold text-gray-900 truncate">{{ mentionPopoverUser.username }}</div>
+            <div v-if="mentionPopoverUser.email" class="text-xs text-gray-500 truncate">{{ mentionPopoverUser.email }}</div>
+          </div>
+          <button class="p-1 rounded hover:bg-gray-100 text-gray-500" @click="closeMentionPopover">
+            <X class="w-4 h-4" />
+          </button>
+        </div>
+      </div>
       
       <TableMaximizeModal
         v-if="showTableMaximizeModal"
@@ -148,6 +174,8 @@ import TextAlign from '@tiptap/extension-text-align'
 import { watch, onBeforeUnmount, inject, ref } from 'vue'
 import SlashCommand from './SlashCommand'
 import { getSuggestion } from './suggestion'
+import MentionExtension from './MentionExtension'
+import { getMentionSuggestion } from './MentionSuggestion'
 import WebsiteCard from './WebsiteCard'
 import EChartsExtension from './EChartsExtension'
 import VideoExtension from './VideoExtension'
@@ -209,7 +237,7 @@ import ImagePreview from '../ImagePreview.vue'
 import FilePreviewModal from '../ui/FilePreviewModal.vue'
 import TableMaximizeModal from '../modals/TableMaximizeModal.vue'
 import DragHandle from '../ui/DragHandle.vue'
-import { Maximize2, ArrowLeftToLine, ArrowRightToLine, Trash2, ArrowUpToLine, ArrowDownToLine, Merge, Split, PaintBucket, AlignLeft, AlignCenter, AlignRight } from 'lucide-vue-next'
+import { Maximize2, ArrowLeftToLine, ArrowRightToLine, Trash2, ArrowUpToLine, ArrowDownToLine, Merge, Split, PaintBucket, AlignLeft, AlignCenter, AlignRight, X } from 'lucide-vue-next'
 
 const props = defineProps<{
   modelValue: string
@@ -227,6 +255,7 @@ const openMediaModal = inject('openMediaModal') as (type: 'image' | 'video' | 'a
 const openLinkModal = inject('openLinkModal') as (callback: (data: { url: string, text: string }) => void) => void
 const openWebsiteCardModal = inject('openWebsiteCardModal') as (callback: (data: string | any) => void) => void
 const openEChartsModal = inject('openEChartsModal') as (callback: (option: any) => void, initialData?: any, type?: string) => void
+const getMentionUsers = inject('getMentionUsers', () => [] as any[])
 
 const previewSrc = ref('')
 const previewFile = ref<{ url: string, name: string }>({ url: '', name: '' })
@@ -302,6 +331,16 @@ const setCellColor = (color: string | null) => {
 
 const handleEditorClick = (e: MouseEvent) => {
   const target = e.target as HTMLElement
+
+  const mentionEl = target.closest('[data-type="mention"]') as HTMLElement | null
+  if (mentionEl) {
+    e.preventDefault()
+    e.stopPropagation()
+    const id = mentionEl.getAttribute('data-mention-id') || ''
+    const name = mentionEl.getAttribute('data-mention-name') || ''
+    openMentionPopover(mentionEl, id, name)
+    return
+  }
   
   // Handle Image Preview
   if (target.tagName === 'IMG') {
@@ -336,6 +375,30 @@ const handleEditorClick = (e: MouseEvent) => {
         return
      }
   }
+}
+
+const showMentionPopover = ref(false)
+const mentionPopoverPos = ref({ x: 0, y: 0 })
+const mentionPopoverUser = ref<any>(null)
+
+const fullAvatarUrl = (url: string) => {
+  if (!url) return ''
+  if (url.startsWith('http')) return url
+  return `${import.meta.env.VITE_API_BASE_URL}${url}`
+}
+
+const openMentionPopover = (el: HTMLElement, id: string, name: string) => {
+  const rect = el.getBoundingClientRect()
+  mentionPopoverPos.value = { x: rect.left + rect.width + 8, y: rect.top - 6 }
+  const users = getMentionUsers()
+  const found = users.find((u: any) => u.id === id || u.username === name)
+  mentionPopoverUser.value = found || { id, username: name }
+  showMentionPopover.value = true
+}
+
+const closeMentionPopover = () => {
+  showMentionPopover.value = false
+  mentionPopoverUser.value = null
 }
 
 const context = {
@@ -511,6 +574,23 @@ const editor = useEditor({
     }),
     SlashCommand.configure({
       suggestion: getSuggestion(context),
+    }),
+    MentionExtension.configure({
+      suggestion: {
+        command: ({ editor, range, props }: any) => {
+          editor
+            .chain()
+            .focus()
+            .deleteRange(range)
+            .insertContent({
+              type: 'mention',
+              attrs: { id: props.id, label: props.username },
+            })
+            .insertContent(' ')
+            .run()
+        },
+        ...getMentionSuggestion(getMentionUsers),
+      },
     }),
     WebsiteCard,
     EChartsExtension,

@@ -23,11 +23,27 @@
           >
             未完成任务
           </button>
+          <button
+            class="px-2 py-1 text-xs rounded border border-gray-200 bg-white text-gray-600 hover:bg-gray-100"
+            :class="mode === 'timers' ? 'border-blue-300 text-blue-600 bg-blue-50' : ''"
+            @click.stop="toggleTimers"
+            title="查看全部定时任务"
+          >
+            定时任务
+          </button>
+          <button
+            class="px-2 py-1 text-xs rounded border border-gray-200 bg-white text-gray-600 hover:bg-gray-100"
+            :class="mode === 'mentions' ? 'border-blue-300 text-blue-600 bg-blue-50' : ''"
+            @click.stop="toggleMentions"
+            title="查看@用户"
+          >
+            @用户
+          </button>
           <kbd class="hidden sm:inline-block px-2 py-0.5 bg-gray-100 border border-gray-200 rounded text-xs text-gray-500 font-sans">ESC</kbd>
         </div>
       </div>
 
-      <div class="px-4 py-2 border-b border-gray-100 bg-white flex flex-wrap gap-2 items-center">
+      <div v-if="mode === 'search'" class="px-4 py-2 border-b border-gray-100 bg-white flex flex-wrap gap-2 items-center">
         <span class="text-xs text-gray-400">筛选：</span>
         <button
           v-for="f in filters"
@@ -64,13 +80,17 @@
                 'bg-blue-100 text-blue-600': item.type === 'group-title',
                 'bg-green-100 text-green-600': item.type === 'node-title',
                 'bg-gray-100 text-gray-500': item.type === 'node-content',
-                'bg-orange-100 text-orange-700': item.type === 'task-unchecked'
+                'bg-orange-100 text-orange-700': item.type === 'task-unchecked',
+                'bg-purple-100 text-purple-700': item.type === 'timer',
+                'bg-indigo-100 text-indigo-700': item.type === 'mention'
               }"
             >
               {{ 
                 item.type === 'group-title' ? '分组标题' : 
                 item.type === 'node-title' ? '节点标题' :
-                item.type === 'task-unchecked' ? '未完成任务' : '节点内容' 
+                item.type === 'task-unchecked' ? '未完成任务' :
+                item.type === 'timer' ? '定时任务' :
+                item.type === 'mention' ? '@用户' : '节点内容' 
               }}
             </span>
           </div>
@@ -80,7 +100,7 @@
         </div>
       </div>
       
-      <div v-else-if="query || mode === 'unfinished-tasks'" class="p-8 text-center text-gray-500 text-sm">
+      <div v-else-if="query || mode !== 'search'" class="p-8 text-center text-gray-500 text-sm">
         未找到相关节点
       </div>
       
@@ -100,7 +120,7 @@ export interface SearchResult {
   score: number
   x: number
   y: number
-  type: 'group-title' | 'node-title' | 'node-content' | 'task-unchecked'
+  type: 'group-title' | 'node-title' | 'node-content' | 'task-unchecked' | 'timer' | 'mention'
 }
 
 const props = defineProps<{
@@ -113,7 +133,7 @@ const emit = defineEmits(['close', 'select'])
 const query = ref('')
 const selectedIndex = ref(0)
 const searchInput = ref<HTMLInputElement>()
-const mode = ref<'search' | 'unfinished-tasks'>('search')
+const mode = ref<'search' | 'unfinished-tasks' | 'timers' | 'mentions'>('search')
 
 const filters = [
   { id: 'task', label: '任务' },
@@ -143,6 +163,16 @@ const toggleFilter = (id: string) => {
 
 const toggleUnfinishedTasks = () => {
   mode.value = mode.value === 'unfinished-tasks' ? 'search' : 'unfinished-tasks'
+  query.value = ''
+}
+
+const toggleTimers = () => {
+  mode.value = mode.value === 'timers' ? 'search' : 'timers'
+  query.value = ''
+}
+
+const toggleMentions = () => {
+  mode.value = mode.value === 'mentions' ? 'search' : 'mentions'
   query.value = ''
 }
 
@@ -223,6 +253,16 @@ const extractUnfinishedTasks = (html: string) => {
   return tasks
 }
 
+const extractMentions = (html: string) => {
+  const doc = parseDoc(html)
+  if (!doc) return [] as { id: string, name: string }[]
+  const els = Array.from(doc.querySelectorAll('[data-type="mention"]')) as HTMLElement[]
+  return els.map(el => ({
+    id: el.getAttribute('data-mention-id') || '',
+    name: el.getAttribute('data-mention-name') || (el.textContent || '').replace('@', '').trim(),
+  })).filter(x => x.name)
+}
+
 // Simple search implementation
 const results = computed(() => {
   if (mode.value === 'unfinished-tasks') {
@@ -243,6 +283,53 @@ const results = computed(() => {
       })
     })
     return taskResults.slice(0, 50)
+  }
+
+  if (mode.value === 'timers') {
+    const timerResults: SearchResult[] = []
+    props.nodes.forEach((node: any) => {
+      const timers = node?.data?.timers
+      if (!Array.isArray(timers)) return
+      timers.forEach((t: any) => {
+        if (!t) return
+        if (!t.enabled) return
+        const nextAt = t.nextTriggerAt
+        if (!nextAt || Number.isNaN(nextAt)) return
+        if (nextAt <= Date.now()) return
+        const title = t.title || '定时任务'
+        timerResults.push({
+          id: node.id,
+          content: `${title} · ${new Date(nextAt).toLocaleString()}`,
+          score: 1,
+          x: node.position.x,
+          y: node.position.y,
+          type: 'timer',
+        })
+      })
+    })
+    timerResults.sort((a, b) => a.content.localeCompare(b.content))
+    return timerResults.slice(0, 50)
+  }
+
+  if (mode.value === 'mentions') {
+    const mentionResults: SearchResult[] = []
+    const q = query.value.trim().toLowerCase()
+    props.nodes.forEach((node: any) => {
+      if (node.type !== 'note' || !node.data?.content) return
+      const ms = extractMentions(node.data.content)
+      ms.forEach(m => {
+        if (q && !m.name.toLowerCase().includes(q)) return
+        mentionResults.push({
+          id: node.id,
+          content: `@${m.name}`,
+          score: 1,
+          x: node.position.x,
+          y: node.position.y,
+          type: 'mention',
+        })
+      })
+    })
+    return mentionResults.slice(0, 50)
   }
 
   if (!query.value.trim()) return []

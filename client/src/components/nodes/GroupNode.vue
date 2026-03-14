@@ -78,6 +78,7 @@
         v-if="!isEditing" 
         class="w-24 truncate cursor-text"
         :style="{ fontSize: (data.fontSize || 12) + 'px' }"
+        :title="data.label || '组名称'"
       >
         {{ data.label || '组名称' }}
       </div>

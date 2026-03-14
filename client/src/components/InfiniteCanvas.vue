@@ -66,6 +66,13 @@
         >
           定时任务...
         </button>
+        <button
+          v-if="menu.type === 'node' && selectedNodes.length <= 1 && isContextGroupNode"
+          @click="autoLayoutGroupChildren"
+          class="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center"
+        >
+          组内一键布局
+        </button>
         <div class="border-t my-1"></div>
 
         <div v-if="selectedNodes.length > 1">
@@ -73,6 +80,7 @@
             所选节点编组
           </button>
           <div class="border-t my-1"></div>
+          <button @click="autoLayoutNodes" class="w-full text-left px-4 py-2 hover:bg-gray-100">一键布局</button>
           <div class="px-4 py-1 text-xs text-gray-400">对齐</div>
           <button @click="alignNodes('left')" class="w-full text-left px-4 py-2 hover:bg-gray-100">左对齐</button>
           <button @click="alignNodes('top')" class="w-full text-left px-4 py-2 hover:bg-gray-100">顶部对齐</button>
@@ -319,6 +327,13 @@
         <HelpCircle class="w-4 h-4" />
       </button>
 
+      <CanvasSwitcherDropdown
+        :current-canvas-id="currentCanvasId"
+        :current-title="canvasTitle"
+        :disabled="!user"
+        @select="handleCanvasSelect"
+      />
+
       <UserMenu 
       v-model:interactionMode="interactionMode"
       :user="user"
@@ -434,6 +449,7 @@ import ShortcutSettingsModal from './modals/ShortcutSettingsModal.vue'
 import SearchBar from './ui/SearchBar.vue'
 import AlarmNotifications, { type AlarmNotification } from './ui/AlarmNotifications.vue'
 import UserMenu from './ui/UserMenu.vue'
+import CanvasSwitcherDropdown from './ui/CanvasSwitcherDropdown.vue'
 import ActiveUsers from './ActiveUsers.vue'
 import CanvasManagerModal from './modals/CanvasManagerModal.vue'
 import ShareModal from './modals/ShareModal.vue'
@@ -1015,6 +1031,37 @@ const openNodeTimerManager = (id: string) => {
 }
 
 provide('openNodeTimerManager', openNodeTimerManager)
+
+const getMentionUsers = () => {
+  const list: any[] = []
+  if (user.value) {
+    list.push({
+      id: user.value.email,
+      username: user.value.nickname || user.value.email,
+      avatar: user.value.avatar,
+      email: user.value.email,
+    })
+  }
+  activeUsers.value.forEach(u => {
+    if (!u) return
+    list.push({
+      id: u.id,
+      username: u.username,
+      avatar: u.avatar,
+      color: u.color,
+    })
+  })
+  const seen = new Set<string>()
+  return list.filter(u => {
+    const key = (u.id || u.username) as string
+    if (!key) return false
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+provide('getMentionUsers', getMentionUsers)
 
 const openTimersForSelection = () => {
   let id: string | null = null
@@ -2468,6 +2515,138 @@ const alignNodes = (type: 'left' | 'top') => {
     }
     logAndCommit()
   }
+  menu.visible = false
+}
+
+const autoLayoutNodes = () => {
+  if (selectedNodes.value.length <= 1) {
+    menu.visible = false
+    return
+  }
+
+  const parsePx = (v: any) => {
+    if (typeof v === 'number') return v
+    if (typeof v !== 'string') return null
+    const m = v.match(/^(\d+(\.\d+)?)px$/)
+    if (!m) return null
+    return parseFloat(m[1])
+  }
+
+  const getSize = (n: any) => {
+    const style = (n.style || {}) as any
+    const w = parsePx(style.width) ?? 300
+    const h = (style.height && style.height !== 'auto') ? (parsePx(style.height) ?? 200) : 200
+    return { w, h }
+  }
+
+  const byParent = new Map<string, any[]>()
+  selectedNodes.value.forEach(n => {
+    const key = (n as any).parentNode || '__root__'
+    if (!byParent.has(key)) byParent.set(key, [])
+    byParent.get(key)!.push(n)
+  })
+
+  const gap = 40
+
+  byParent.forEach(list => {
+    const sorted = [...list].sort((a, b) => (a.position.y - b.position.y) || (a.position.x - b.position.x))
+    const minX = Math.min(...sorted.map(n => n.position.x))
+    const minY = Math.min(...sorted.map(n => n.position.y))
+
+    const sizes = sorted.map(getSize)
+    const maxW = Math.max(...sizes.map(s => s.w))
+    const maxH = Math.max(...sizes.map(s => s.h))
+
+    const cols = Math.max(1, Math.ceil(Math.sqrt(sorted.length)))
+    const cellW = maxW + gap
+    const cellH = maxH + gap
+
+    sorted.forEach((n, idx) => {
+      const col = idx % cols
+      const row = Math.floor(idx / cols)
+      n.position.x = minX + col * cellW
+      n.position.y = minY + row * cellH
+    })
+  })
+
+  logAndCommit()
+  menu.visible = false
+}
+
+const isContextGroupNode = computed(() => {
+  if (!menu.contextNodeId) return false
+  const node = nodes.value.find(n => n.id === menu.contextNodeId)
+  return !!node && node.type === 'group'
+})
+
+const autoLayoutGroupChildren = () => {
+  if (!menu.contextNodeId) {
+    menu.visible = false
+    return
+  }
+
+  const groupId = menu.contextNodeId
+  const group = nodes.value.find(n => n.id === groupId && n.type === 'group') as any
+  if (!group) {
+    menu.visible = false
+    return
+  }
+
+  const children = nodes.value.filter(n => (n as any).parentNode === groupId) as any[]
+  if (children.length === 0) {
+    menu.visible = false
+    return
+  }
+
+  const parsePx = (v: any) => {
+    if (typeof v === 'number') return v
+    if (typeof v !== 'string') return null
+    const m = v.match(/^(\d+(\.\d+)?)px$/)
+    if (!m) return null
+    return parseFloat(m[1])
+  }
+
+  const getSize = (n: any) => {
+    const style = (n.style || {}) as any
+    const w = parsePx(style.width) ?? 300
+    const h = (style.height && style.height !== 'auto') ? (parsePx(style.height) ?? 200) : 200
+    return { w, h }
+  }
+
+  const gap = 32
+  const paddingX = 20
+  const paddingTop = 40
+  const paddingBottom = 20
+
+  const sizes = children.map(getSize)
+  const maxW = Math.max(...sizes.map(s => s.w))
+  const maxH = Math.max(...sizes.map(s => s.h))
+  const cols = Math.max(1, Math.ceil(Math.sqrt(children.length)))
+  const rows = Math.ceil(children.length / cols)
+
+  children
+    .sort((a, b) => (a.position.y - b.position.y) || (a.position.x - b.position.x))
+    .forEach((n, idx) => {
+      const col = idx % cols
+      const row = Math.floor(idx / cols)
+      n.position.x = paddingX + col * (maxW + gap)
+      n.position.y = paddingTop + row * (maxH + gap)
+    })
+
+  const neededW = paddingX * 2 + cols * maxW + (cols - 1) * gap
+  const neededH = paddingTop + paddingBottom + rows * maxH + (rows - 1) * gap
+
+  const groupStyle = (group.style || {}) as any
+  const curW = parsePx(groupStyle.width) ?? 200
+  const curH = parsePx(groupStyle.height) ?? 200
+
+  group.style = {
+    ...groupStyle,
+    width: `${Math.max(curW, neededW)}px`,
+    height: `${Math.max(curH, neededH)}px`,
+  }
+
+  logAndCommit()
   menu.visible = false
 }
 

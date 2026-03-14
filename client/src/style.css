@@ -85,3 +85,10 @@ code {
 .hljs-strong {
   font-weight: 700;
 }
+
+a[data-type='mention'] {
+  color: #2563eb;
+  text-decoration: underline;
+  cursor: pointer;
+  font-weight: 600;
+}

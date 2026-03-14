@@ -131,12 +131,12 @@
           <Maximize2 class="w-4 h-4" />
         </button>
         <button 
-          v-if="!isCollapsed && hasFixedSize" 
+          v-if="!isCollapsed" 
           @click.stop="resetSize" 
           class="p-1 hover:bg-gray-100 rounded text-gray-500" 
-          title="重置大小"
+          :title="resetSizeTitle"
         >
-          <RotateCcw class="w-4 h-4" />
+          <component :is="resetSizeIcon" class="w-4 h-4" />
         </button>
         <button @click.stop="toggleCollapse" class="p-1 hover:bg-gray-100 rounded text-gray-500" :title="isCollapsed ? '展开' : '折叠'">
           <component :is="isCollapsed ? ChevronDown : ChevronUp" class="w-4 h-4" />
@@ -169,7 +169,7 @@
 import { ref, watch, onMounted, nextTick, reactive, inject, computed } from 'vue'
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core'
 import { NodeResizeControl } from '@vue-flow/node-resizer'
-import { Maximize2, ChevronUp, ChevronDown, RotateCcw, Copy, AlarmClock } from 'lucide-vue-next'
+import { Maximize2, ChevronUp, ChevronDown, Copy, AlarmClock, Expand, LayoutGrid, Square } from 'lucide-vue-next'
 import TiptapEditor from './TiptapEditor.vue'
 import '@vue-flow/node-resizer/dist/style.css'
 
@@ -190,11 +190,27 @@ const nodeRef = ref<HTMLElement>()
 
 const { findNode } = useVueFlow()
 
-const hasFixedSize = computed(() => {
+type SizeMode = 'auto' | 'init' | 'fixed' | 'custom'
+
+const sizeMode = computed<SizeMode>(() => {
   const node = findNode(props.id)
-  if (!node || !node.style) return false
-  const style = node.style as Record<string, any>
-  return (style.height && style.height !== 'auto') || (style.width && style.width !== 'auto')
+  const style = (node?.style || {}) as Record<string, any>
+  const w = style.width
+  const h = style.height
+  const minH = style.minHeight
+
+  const isAuto = (!w || w === undefined) && (!h || h === 'auto')
+  if (isAuto) return 'auto'
+  if (w === '300px' && (!h || h === 'auto') && minH === '200px') return 'init'
+  if (w === '300px' && h === '200px') return 'fixed'
+  return 'custom'
+})
+
+const resetSizeIcon = computed(() => {
+  if (sizeMode.value === 'auto') return Expand
+  if (sizeMode.value === 'init') return LayoutGrid
+  if (sizeMode.value === 'fixed') return Square
+  return Expand
 })
 
 const hasActiveTimers = computed(() => {
@@ -291,17 +307,42 @@ const resetSize = () => {
   const node = findNode(props.id)
   if (node) {
     const style = (node.style || {}) as Record<string, any>
-    node.style = { 
-      ...style, 
-      height: 'auto',
-      width: undefined 
-    }
-    if (props.data.expandedHeight) {
-      delete props.data.expandedHeight
+    if (sizeMode.value === 'auto') {
+      node.style = {
+        ...style,
+        width: '300px',
+        height: 'auto',
+        minHeight: '200px',
+      }
+    } else if (sizeMode.value === 'init') {
+      node.style = {
+        ...style,
+        width: '300px',
+        height: '200px',
+        minHeight: undefined,
+      }
+    } else {
+      node.style = {
+        ...style,
+        height: 'auto',
+        width: undefined,
+        minHeight: undefined,
+      }
+      if (props.data.expandedHeight) {
+        delete props.data.expandedHeight
+      }
     }
     saveHistory()
+    saveData()
   }
 }
+
+const resetSizeTitle = computed(() => {
+  if (sizeMode.value === 'auto') return '切换到初始化大小'
+  if (sizeMode.value === 'init') return '切换到固定宽高'
+  if (sizeMode.value === 'fixed') return '切换到自动撑开'
+  return '切换到自动撑开'
+})
 
 import TurndownService from 'turndown'
 import { gfm } from 'turndown-plugin-gfm'
