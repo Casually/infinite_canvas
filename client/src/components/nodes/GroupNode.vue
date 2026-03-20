@@ -121,6 +121,9 @@ const startEdit = () => {
 
 const stopEdit = () => {
   isEditing.value = false
+  const nowIso = new Date().toISOString()
+  ;(props.data as any).createdAt = (props.data as any).createdAt || nowIso
+  ;(props.data as any).updatedAt = nowIso
   saveHistory()
 }
 </script>

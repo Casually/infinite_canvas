@@ -7,9 +7,13 @@
       @pane-ready="onPaneReady"
       @pane-dbl-click="onPaneDblClick"
       @pane-context-menu="onPaneContextMenu"
+      @selection-context-menu="onSelectionContextMenu"
       @node-context-menu="onNodeContextMenu"
       @connect="onConnect"
       @click="closeMenu"
+      :select-nodes-on-drag="true"
+      :selection-key-code="'Shift'"
+      :multi-selection-key-code="['Meta', 'Control']"
       :snap-to-grid="true"
       :snap-grid="[20, 20]"
       :min-zoom="0.1"
@@ -53,6 +57,9 @@
         <button @click="addNote" class="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center">
           新建便签
         </button>
+        <button @click="addGroup" class="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center">
+          新建分组
+        </button>
       </div>
 
       <div v-if="menu.type === 'node' || menu.type === 'selection'">
@@ -81,6 +88,7 @@
           </button>
           <div class="border-t my-1"></div>
           <button @click="autoLayoutNodes" class="w-full text-left px-4 py-2 hover:bg-gray-100">一键布局</button>
+          <button @click="connectSelectedNodes" class="w-full text-left px-4 py-2 hover:bg-gray-100">一键连线</button>
           <div class="px-4 py-1 text-xs text-gray-400">对齐</div>
           <button @click="alignNodes('left')" class="w-full text-left px-4 py-2 hover:bg-gray-100">左对齐</button>
           <button @click="alignNodes('top')" class="w-full text-left px-4 py-2 hover:bg-gray-100">顶部对齐</button>
@@ -187,7 +195,7 @@
             :container-ref="previewContainerRef"
           />
           <div ref="previewContainerRef" class="flex-1 overflow-y-auto p-4 relative">
-             <TiptapEditor v-model="previewNode.data.content" :editable="true" />
+             <TiptapEditor v-model="previewNode.data.content" :editable="true" :node-id="previewNode.id" />
           </div>
         </div>
       </div>
@@ -230,8 +238,10 @@
     <ConfirmationModal
       v-if="showConfirmModal"
       :message="confirmModalMessage"
+      :checkbox-label="confirmModalCheckboxLabel || undefined"
+      :checkbox-default-checked="confirmModalCheckboxDefaultChecked"
       @confirm="handleConfirm"
-      @cancel="showConfirmModal = false"
+      @cancel="handleCancelConfirm"
     />
 
     <ShortcutSettingsModal
@@ -261,6 +271,14 @@
       :nodes="nodes"
       @close="showSearch = false"
       @select="handleSearchResult"
+    />
+
+    <NodeLinkModal
+      v-if="showNodeLinkModal && linkSourceNodeId"
+      :nodes="nodes"
+      :exclude-node-id="linkSourceNodeId"
+      @close="showNodeLinkModal = false"
+      @confirm="handleNodeLinkConfirm"
     />
 
     <AlarmNotifications
@@ -458,6 +476,7 @@ import ShareManagerModal from './modals/ShareManagerModal.vue'
 import HistoryModal from './modals/HistoryModal.vue'
 import PasswordModal from './modals/PasswordModal.vue'
 import NodeTimerManagerModal, { type NodeTimer } from './modals/NodeTimerManagerModal.vue'
+import NodeLinkModal from './modals/NodeLinkModal.vue'
 import CanvasConflictResolver from './modals/CanvasConflictResolver.vue'
 import { io, type Socket } from 'socket.io-client'
 import { useShortcuts } from '../composables/useShortcuts'
@@ -728,15 +747,24 @@ const handleCanvasSelect = async (id: string) => {
 }
 
 const loadCanvas = async (id: string, password?: string) => {
+  const ensureNodeTimestamps = (node: any) => {
+    const nowIso = new Date().toISOString()
+    if (!node.data) node.data = {}
+    if (!node.data.createdAt) node.data.createdAt = node.data.updatedAt || nowIso
+    if (!node.data.updatedAt) node.data.updatedAt = node.data.createdAt || nowIso
+    return node
+  }
+
   const normalizeNodes = (inputNodes: any[]) => {
     return (inputNodes || []).map((n: any) => {
+      const node = ensureNodeTimestamps({ ...n })
       if (n?.type === 'group') {
-        const style = (n.style || {}) as any
+        const style = (node.style || {}) as any
         if (style.zIndex === -1) {
-          return { ...n, style: { ...style, zIndex: 0 } }
+          return { ...node, style: { ...style, zIndex: 0 } }
         }
       }
-      return n
+      return node
     })
   }
 
@@ -967,20 +995,31 @@ const showLinkModal = ref(false)
 const showCardModal = ref(false)
 const showEChartsModal = ref(false)
 const showSearch = ref(false)
+const showNodeLinkModal = ref(false)
+const linkSourceNodeId = ref<string | null>(null)
 const showAuthModal = ref(false)
 const showChangePasswordModal = ref(false)
 const showTechSupportModal = ref(false)
 const showShortcutSettingsModal = ref(false)
 const showConfirmModal = ref(false)
 const confirmModalMessage = ref('')
-const confirmCallback = ref<(() => void) | null>(null)
+const confirmModalCheckboxLabel = ref<string | null>(null)
+const confirmModalCheckboxDefaultChecked = ref(false)
+const confirmCallback = ref<((checked?: boolean) => void) | null>(null)
 
-const handleConfirm = () => {
-  if (confirmCallback.value) {
-    confirmCallback.value()
-  }
+const handleConfirm = (checked?: boolean) => {
+  confirmCallback.value?.(checked)
   showConfirmModal.value = false
   confirmCallback.value = null
+  confirmModalCheckboxLabel.value = null
+  confirmModalCheckboxDefaultChecked.value = false
+}
+
+const handleCancelConfirm = () => {
+  showConfirmModal.value = false
+  confirmCallback.value = null
+  confirmModalCheckboxLabel.value = null
+  confirmModalCheckboxDefaultChecked.value = false
 }
 
 const user = ref<{ email: string, token: string, nickname?: string, avatar?: string } | null>(null)
@@ -1656,6 +1695,12 @@ provide('markDirty', () => {
   handleContentChange()
 })
 
+provide('openNodeLinkModal', (sourceNodeId: string) => {
+  if (isReadOnly.value) return
+  linkSourceNodeId.value = sourceNodeId
+  showNodeLinkModal.value = true
+})
+
 // 还需要监听 nodes/edges 的直接替换（例如导入数据）
 watch([nodes, edges], (newVals, oldVals) => {
   // 如果是引用变化（替换了整个数组），肯定需要保存
@@ -2151,6 +2196,7 @@ onNodeDragStop(({ nodes: draggedNodes }) => {
     if (stateNodeIndex === -1) return
     
     const stateNode = newNodes[stateNodeIndex]
+    const nowIso = new Date().toISOString()
     
     // Get absolute position and dimensions
     // Note: GraphNode has positionAbsolute, dimensions
@@ -2200,7 +2246,12 @@ onNodeDragStop(({ nodes: draggedNodes }) => {
           position: {
             x: absPos.x - gAbsPos.x,
             y: absPos.y - gAbsPos.y
-          }
+          },
+          data: {
+            ...(stateNode as any).data,
+            createdAt: (stateNode as any).data?.createdAt || nowIso,
+            updatedAt: nowIso,
+          },
         }
         hasChanges = true
       }
@@ -2215,7 +2266,12 @@ onNodeDragStop(({ nodes: draggedNodes }) => {
           position: {
             x: absPos.x,
             y: absPos.y
-          }
+          },
+          data: {
+            ...(stateNode as any).data,
+            createdAt: (stateNode as any).data?.createdAt || nowIso,
+            updatedAt: nowIso,
+          },
         }
         hasChanges = true
       }
@@ -2271,6 +2327,7 @@ const duplicateNodes = () => {
   
   // 3. Create clones
   nodesToClone.forEach((node) => {
+    const nowIso = new Date().toISOString()
     const newId = idMap.get(node.id)!
     const isParentCloned = node.parentNode && idMap.has(node.parentNode)
     
@@ -2282,6 +2339,8 @@ const duplicateNodes = () => {
     
     // Deep clone data
     const newData = JSON.parse(JSON.stringify(node.data))
+    newData.createdAt = nowIso
+    newData.updatedAt = nowIso
     
     newNodes.push({
       ...node,
@@ -2310,6 +2369,16 @@ const onPaneContextMenu = (event: MouseEvent) => {
   menu.y = event.clientY
   menu.type = 'pane'
   menu.contextNodeId = null
+}
+
+const onSelectionContextMenu = (selectionEvent: { event: MouseEvent, nodes: any[] }) => {
+  if (isReadOnly.value) return
+  selectionEvent.event.preventDefault()
+  menu.visible = true
+  menu.x = selectionEvent.event.clientX
+  menu.y = selectionEvent.event.clientY
+  menu.type = 'selection'
+  menu.contextNodeId = selectionEvent.nodes?.[0]?.id || null
 }
 
 const onNodeContextMenu = (event: NodeMouseEvent) => {
@@ -2347,17 +2416,89 @@ const onNodeContextMenu = (event: NodeMouseEvent) => {
   menu.contextNodeId = event.node.id
 }
 
+const connectSelectedNodes = () => {
+  if (isReadOnly.value) return
+  const selected = getSelectedNodes.value
+  if (selected.length < 2) return
+
+  const sorted = [...selected].sort((a: any, b: any) => {
+    const ay = a.position?.y ?? 0
+    const by = b.position?.y ?? 0
+    if (ay !== by) return ay - by
+    const ax = a.position?.x ?? 0
+    const bx = b.position?.x ?? 0
+    return ax - bx
+  })
+
+  const existing = new Set<string>()
+  edges.value.forEach((e: any) => {
+    if (!e?.source || !e?.target) return
+    existing.add(`${e.source}→${e.target}`)
+  })
+
+  const newEdges: Edge[] = []
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const source = sorted[i].id
+    const target = sorted[i + 1].id
+    if (!source || !target) continue
+    const key = `${source}→${target}`
+    if (existing.has(key)) continue
+    existing.add(key)
+    newEdges.push({ id: uuidv4(), source, target } as any)
+  }
+
+  if (newEdges.length === 0) return
+  edges.value = [...edges.value, ...newEdges]
+  logAndCommit()
+}
+
+const handleNodeLinkConfirm = (targetNodeIds: string[]) => {
+  const sourceId = linkSourceNodeId.value
+  if (!sourceId) {
+    showNodeLinkModal.value = false
+    return
+  }
+
+  const existing = new Set<string>()
+  edges.value.forEach((e: any) => {
+    if (!e?.source || !e?.target) return
+    existing.add(`${e.source}→${e.target}`)
+  })
+
+  const newEdges: Edge[] = []
+  targetNodeIds.forEach(targetId => {
+    if (!targetId) return
+    if (targetId === sourceId) return
+    const key = `${sourceId}→${targetId}`
+    if (existing.has(key)) return
+    existing.add(key)
+    newEdges.push({ id: uuidv4(), source: sourceId, target: targetId } as any)
+  })
+
+  if (newEdges.length > 0) {
+    edges.value = [...edges.value, ...newEdges]
+    logAndCommit()
+  }
+
+  showNodeLinkModal.value = false
+}
+
 // Actions
 const setNodeColor = (color: string) => {
   if (menu.contextNodeId) {
+    const nowIso = new Date().toISOString()
     if (menu.type === 'selection') {
       selectedNodes.value.forEach(node => {
         node.data.backgroundColor = color
+        if (!node.data.createdAt) node.data.createdAt = nowIso
+        node.data.updatedAt = nowIso
       })
     } else {
       const node = nodes.value.find(n => n.id === menu.contextNodeId)
       if (node) {
         node.data.backgroundColor = color
+        if (!node.data.createdAt) node.data.createdAt = nowIso
+        node.data.updatedAt = nowIso
       }
     }
     logAndCommit()
@@ -2367,9 +2508,12 @@ const setNodeColor = (color: string) => {
 
 const updateFontStyle = () => {
   if (menu.contextNodeId) {
+    const nowIso = new Date().toISOString()
     const applyStyle = (node: Node) => {
       node.data.fontSize = currentFontSize.value
       node.data.fontColor = currentFontColor.value
+      if (!node.data.createdAt) node.data.createdAt = nowIso
+      node.data.updatedAt = nowIso
     }
 
     if (menu.type === 'selection') {
@@ -2384,6 +2528,41 @@ const updateFontStyle = () => {
 
 const addNote = () => {
   createNoteAt(menu.x, menu.y)
+  closeMenu()
+}
+
+const createGroupAt = (clientX?: number, clientY?: number) => {
+  let x, y
+
+  if (clientX !== undefined && clientY !== undefined) {
+    const p = project({ x: clientX, y: clientY })
+    x = p.x
+    y = p.y
+  } else {
+    if (vueFlowInstance.value) {
+      const p = project({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+      x = p.x
+      y = p.y
+    } else {
+      x = 250
+      y = 100
+    }
+  }
+
+  const nowIso = new Date().toISOString()
+  const groupNode: Node = {
+    id: uuidv4(),
+    type: 'group',
+    position: { x, y },
+    style: { width: '400px', height: '260px', zIndex: 0 },
+    data: { label: '新建分组', createdAt: nowIso, updatedAt: nowIso },
+  }
+  nodes.value.push(groupNode)
+  logAndCommit()
+}
+
+const addGroup = () => {
+  createGroupAt(menu.x, menu.y)
   closeMenu()
 }
 
@@ -2421,15 +2600,78 @@ const deleteNode = () => {
   const groupsToDelete = nodes.value.filter(n => nodesToDelete.has(n.id) && n.type === 'group')
   
   if (groupsToDelete.length > 0) {
-    confirmModalMessage.value = '组删除会同步删除组内所有节点，是否确认删除？'
-    confirmCallback.value = () => {
-      // Add all children of these groups to deletion list
-      const groupIds = new Set(groupsToDelete.map(g => g.id))
-      nodes.value.forEach(n => {
-        if (n.parentNode && groupIds.has(n.parentNode)) {
-          nodesToDelete.add(n.id)
+    confirmModalMessage.value = '是否删除分组？默认仅删除分组本身'
+    confirmModalCheckboxLabel.value = '同时删除分组内所有元素'
+    confirmModalCheckboxDefaultChecked.value = false
+    confirmCallback.value = (deleteChildren?: boolean) => {
+      const nodeMap = new Map<string, any>()
+      nodes.value.forEach(n => nodeMap.set(n.id, n))
+
+      const getAbs = (id: string) => {
+        let x = 0
+        let y = 0
+        const visited = new Set<string>()
+        let curId: string | undefined = id
+        while (curId) {
+          if (visited.has(curId)) break
+          visited.add(curId)
+          const n = nodeMap.get(curId)
+          if (!n) break
+          x += n.position?.x || 0
+          y += n.position?.y || 0
+          const p = n.parentNode
+          if (p && nodeMap.get(p)?.type === 'group') curId = p
+          else break
         }
+        return { x, y }
+      }
+
+      const groupIds = new Set(groupsToDelete.map(g => g.id))
+
+      if (deleteChildren) {
+        const stack = [...groupIds]
+        while (stack.length) {
+          const gid = stack.pop()!
+          nodes.value.forEach(n => {
+            if (n.parentNode === gid) {
+              if (!nodesToDelete.has(n.id)) nodesToDelete.add(n.id)
+              if (n.type === 'group') stack.push(n.id)
+            }
+          })
+        }
+        performDelete(nodesToDelete, edgesToDelete)
+        return
+      }
+
+      const resolveParent = (node: any) => {
+        let pid: string | undefined = node.parentNode
+        while (pid && nodesToDelete.has(pid) && nodeMap.get(pid)?.type === 'group') {
+          pid = nodeMap.get(pid)?.parentNode
+        }
+        return pid
+      }
+
+      const updatedNodes = nodes.value.map(n => {
+        if (nodesToDelete.has(n.id)) return n
+        if (!n.parentNode) return n
+        if (!nodesToDelete.has(n.parentNode)) return n
+        if (nodeMap.get(n.parentNode)?.type !== 'group') return n
+
+        const abs = getAbs(n.id)
+        const newParent = resolveParent(n)
+        if (newParent && nodeMap.get(newParent)?.type === 'group') {
+          const pAbs = getAbs(newParent)
+          return {
+            ...n,
+            parentNode: newParent,
+            position: { x: abs.x - pAbs.x, y: abs.y - pAbs.y },
+            extent: undefined,
+          }
+        }
+        return { ...n, parentNode: undefined, position: abs, extent: undefined }
       })
+
+      nodes.value = updatedNodes
       performDelete(nodesToDelete, edgesToDelete)
     }
     showConfirmModal.value = true
@@ -2472,12 +2714,13 @@ const groupNodes = () => {
     maxY += padding
     
     const groupId = uuidv4()
+    const nowIso = new Date().toISOString()
     const groupNode: Node = {
       id: groupId,
       type: 'group',
       position: { x: minX, y: minY },
       style: { width: `${maxX - minX}px`, height: `${maxY - minY}px`, zIndex: 0 },
-      data: { label: '新建分组' },
+      data: { label: '新建分组', createdAt: nowIso, updatedAt: nowIso },
     }
     
     // Create new node objects for children with updated position and parent
@@ -2489,6 +2732,11 @@ const groupNodes = () => {
       position: {
         x: node.position.x - minX,
         y: node.position.y - minY
+      },
+      data: {
+        ...(node.data || {}),
+        createdAt: (node as any).data?.createdAt || nowIso,
+        updatedAt: nowIso,
       },
       extent: undefined // Ensure extent is reset if needed
     }))
@@ -2506,12 +2754,21 @@ const groupNodes = () => {
 
 const alignNodes = (type: 'left' | 'top') => {
   if (selectedNodes.value.length > 1) {
+    const nowIso = new Date().toISOString()
     if (type === 'left') {
       const minX = Math.min(...selectedNodes.value.map(n => n.position.x))
-      selectedNodes.value.forEach(n => n.position.x = minX)
+      selectedNodes.value.forEach(n => {
+        n.position.x = minX
+        if (!n.data.createdAt) n.data.createdAt = nowIso
+        n.data.updatedAt = nowIso
+      })
     } else if (type === 'top') {
       const minY = Math.min(...selectedNodes.value.map(n => n.position.y))
-      selectedNodes.value.forEach(n => n.position.y = minY)
+      selectedNodes.value.forEach(n => {
+        n.position.y = minY
+        if (!n.data.createdAt) n.data.createdAt = nowIso
+        n.data.updatedAt = nowIso
+      })
     }
     logAndCommit()
   }
@@ -2548,6 +2805,7 @@ const autoLayoutNodes = () => {
 
   const gap = 40
 
+  const nowIso = new Date().toISOString()
   byParent.forEach(list => {
     const sorted = [...list].sort((a, b) => (a.position.y - b.position.y) || (a.position.x - b.position.x))
     const minX = Math.min(...sorted.map(n => n.position.x))
@@ -2566,6 +2824,8 @@ const autoLayoutNodes = () => {
       const row = Math.floor(idx / cols)
       n.position.x = minX + col * cellW
       n.position.y = minY + row * cellH
+      if (!n.data.createdAt) n.data.createdAt = nowIso
+      n.data.updatedAt = nowIso
     })
   })
 
@@ -2763,11 +3023,12 @@ const createNoteAt = (clientX?: number, clientY?: number) => {
     }
   }
 
+  const nowIso = new Date().toISOString()
   const newNode: Node = {
     id: uuidv4(),
     type: 'note',
     position: { x, y },
-    data: { label: 'New Note', initialFocus: true, borderWidth: 1 },
+    data: { label: 'New Note', initialFocus: true, borderWidth: 1, createdAt: nowIso, updatedAt: nowIso },
     style: { width: '300px', height: 'auto', minHeight: '200px' },
   }
   nodes.value.push(newNode)

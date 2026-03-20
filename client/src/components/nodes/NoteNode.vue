@@ -159,6 +159,7 @@
         ref="editorRef" 
         v-model="content" 
         :editable="isEditing"
+        :node-id="id"
         @blur="exitEditMode"
       />
     </div>
@@ -279,6 +280,9 @@ watch(() => props.data.isCollapsed, (val) => {
 })
 
 const toggleCollapse = () => {
+  const nowIso = new Date().toISOString()
+  ;(props.data as any).createdAt = (props.data as any).createdAt || nowIso
+  ;(props.data as any).updatedAt = nowIso
   const node = findNode(props.id)
   isCollapsed.value = !isCollapsed.value
   props.data.isCollapsed = isCollapsed.value
@@ -304,6 +308,9 @@ const toggleCollapse = () => {
 }
 
 const resetSize = () => {
+  const nowIso = new Date().toISOString()
+  ;(props.data as any).createdAt = (props.data as any).createdAt || nowIso
+  ;(props.data as any).updatedAt = nowIso
   const node = findNode(props.id)
   if (node) {
     const style = (node.style || {}) as Record<string, any>
@@ -378,6 +385,9 @@ const startTitleEdit = () => {
 
 const stopTitleEdit = () => {
   isTitleEditing.value = false
+  const nowIso = new Date().toISOString()
+  ;(props.data as any).createdAt = (props.data as any).createdAt || nowIso
+  ;(props.data as any).updatedAt = nowIso
   saveHistory()
 }
 
@@ -414,6 +424,9 @@ const enterEditMode = () => {
 
 const exitEditMode = () => {
   isEditing.value = false
+  const nowIso = new Date().toISOString()
+  ;(props.data as any).createdAt = (props.data as any).createdAt || nowIso
+  ;(props.data as any).updatedAt = nowIso
   saveHistory()
 }
 
@@ -430,6 +443,9 @@ const onResizeEnd = (event: any) => {
       minHeight: undefined
     }
   }
+  const nowIso = new Date().toISOString()
+  ;(props.data as any).createdAt = (props.data as any).createdAt || nowIso
+  ;(props.data as any).updatedAt = nowIso
   saveHistory()
 }
 

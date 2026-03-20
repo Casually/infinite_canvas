@@ -13,6 +13,10 @@
       
       <div class="px-6 py-4">
         <p class="text-sm text-gray-500">{{ message }}</p>
+        <label v-if="checkboxLabel" class="mt-3 flex items-center gap-2 text-sm text-gray-700 select-none">
+          <input v-model="checked" type="checkbox" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" />
+          <span>{{ checkboxLabel }}</span>
+        </label>
       </div>
       
       <div class="bg-gray-50 px-6 py-3 flex flex-row-reverse gap-2">
@@ -34,17 +38,23 @@
 </template>
 
 <script setup lang="ts">
-defineProps<{
+import { ref } from 'vue'
+
+const props = defineProps<{
   title?: string
   message: string
   confirmText?: string
   cancelText?: string
+  checkboxLabel?: string
+  checkboxDefaultChecked?: boolean
 }>()
 
 const emit = defineEmits(['confirm', 'cancel'])
 
+const checked = ref(!!props.checkboxDefaultChecked)
+
 const onConfirm = () => {
-  emit('confirm')
+  emit('confirm', checked.value)
 }
 
 const onCancel = () => {

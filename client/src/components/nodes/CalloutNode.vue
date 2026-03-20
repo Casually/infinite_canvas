@@ -9,17 +9,18 @@
           borderLeftColor: style.color
         }"
       >
-        <div class="mt-0.5 select-none relative group" contenteditable="false">
+        <div ref="iconWrapRef" class="mt-0.5 select-none relative" contenteditable="false">
           <button 
-            @click="cycleType" 
+            @click.stop="togglePicker"
             class="p-1 rounded hover:bg-black/5 transition-colors"
             :style="{ color: style.color }"
+            :disabled="!editor.isEditable"
           >
             <component :is="iconComponent" class="w-5 h-5" />
           </button>
           
           <!-- Type Selector Tooltip -->
-          <div class="absolute top-full left-0 mt-1 bg-white shadow-lg border rounded p-1 hidden group-hover:flex gap-1 z-10">
+          <div v-if="showPicker" class="absolute top-full left-0 mt-1 bg-white shadow-lg border rounded p-1 flex gap-1 z-10">
             <button 
               v-for="t in types" 
               :key="t"
@@ -39,7 +40,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { nodeViewProps, NodeViewWrapper, NodeViewContent } from '@tiptap/vue-3'
 import { Info, AlertTriangle, XCircle, CheckCircle, Lightbulb, HelpCircle, AlertOctagon, Flame } from 'lucide-vue-next'
 import BaseBlockWrapper from './BaseBlockWrapper.vue'
@@ -47,6 +48,8 @@ import BaseBlockWrapper from './BaseBlockWrapper.vue'
 const props = defineProps(nodeViewProps)
 
 const types = ['info', 'warning', 'error', 'success', 'tip', 'question', 'important', 'bug']
+const showPicker = ref(false)
+const iconWrapRef = ref<HTMLElement | null>(null)
 
 const getStyle = (type: string) => {
   switch (type) {
@@ -77,14 +80,31 @@ const iconComponent = computed(() => {
 })
 
 const setType = (type: string) => {
+  if (!props.editor.isEditable) return
   props.updateAttributes({ type })
+  showPicker.value = false
 }
 
-const cycleType = () => {
-  const currentIndex = types.indexOf(props.node.attrs.type)
-  const nextIndex = (currentIndex + 1) % types.length
-  setType(types[nextIndex])
+const togglePicker = () => {
+  if (!props.editor.isEditable) return
+  showPicker.value = !showPicker.value
 }
+
+const onDocMouseDown = (e: MouseEvent) => {
+  if (!showPicker.value) return
+  const el = iconWrapRef.value
+  if (!el) return
+  if (e.target instanceof Node && el.contains(e.target)) return
+  showPicker.value = false
+}
+
+onMounted(() => {
+  document.addEventListener('mousedown', onDocMouseDown)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('mousedown', onDocMouseDown)
+})
 </script>
 
 <style>

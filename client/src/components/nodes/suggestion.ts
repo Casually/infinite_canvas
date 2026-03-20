@@ -231,6 +231,14 @@ export const getSuggestion = (context: any) => {
           },
         },
         {
+          title: '关联节点',
+          icon: Link,
+          command: ({ editor, range }: any) => {
+            editor.chain().focus().deleteRange(range).run()
+            context.linkNodes()
+          },
+        },
+        {
           title: '网站卡片',
           icon: Globe,
           command: ({ editor, range }: any) => {

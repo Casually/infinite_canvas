@@ -243,6 +243,7 @@ const props = defineProps<{
   modelValue: string
   editable?: boolean
   disableTableResize?: boolean
+  nodeId?: string
 }>()
 
 const emit = defineEmits<{
@@ -255,6 +256,7 @@ const openMediaModal = inject('openMediaModal') as (type: 'image' | 'video' | 'a
 const openLinkModal = inject('openLinkModal') as (callback: (data: { url: string, text: string }) => void) => void
 const openWebsiteCardModal = inject('openWebsiteCardModal') as (callback: (data: string | any) => void) => void
 const openEChartsModal = inject('openEChartsModal') as (callback: (option: any) => void, initialData?: any, type?: string) => void
+const openNodeLinkModal = inject('openNodeLinkModal') as ((sourceNodeId: string) => void) | undefined
 const getMentionUsers = inject('getMentionUsers', () => [] as any[])
 
 const previewSrc = ref('')
@@ -478,7 +480,12 @@ const context = {
         editor.value.chain().focus().setECharts(data).run()
       }
     }, initialData, type)
-  }
+  },
+  linkNodes: () => {
+    if (!props.nodeId) return
+    if (!openNodeLinkModal) return
+    openNodeLinkModal(props.nodeId)
+  },
 }
 
 const markDirty = inject('markDirty', () => {})
@@ -646,6 +653,27 @@ const editor = useEditor({
       },
     },
     handlePaste: (view, event) => {
+      const isInCodeBlock = (() => {
+        try {
+          const { $from } = view.state.selection
+          for (let d = $from.depth; d > 0; d--) {
+            if ($from.node(d).type.name === 'codeBlock') return true
+          }
+          return false
+        } catch {
+          return false
+        }
+      })()
+
+      if (isInCodeBlock) {
+        const plainText = event.clipboardData?.getData('text/plain')
+        if (plainText != null) {
+          event.preventDefault()
+          view.dispatch(view.state.tr.insertText(plainText))
+          return true
+        }
+      }
+
       const item = event.clipboardData?.items[0]
       if (item) {
         if (item.type === 'text/plain') {
@@ -892,21 +920,21 @@ ul[data-type="taskList"] {
   list-style: none;
   padding: 0;
 }
-ul[data-type="taskList"] li {
+ul[data-type="taskList"] > li {
   display: flex;
   align-items: flex-start;
 }
-ul[data-type="taskList"] li > label {
+ul[data-type="taskList"] > li > label {
   flex: 0 0 auto;
   margin-right: 0.5rem;
   user-select: none;
   /* Align with the first line of text */
   margin-top: 0.35em;
 }
-ul[data-type="taskList"] li > div {
+ul[data-type="taskList"] > li > div {
   flex: 1 1 auto;
 }
-ul[data-type="taskList"] li > div > p {
+ul[data-type="taskList"] > li > div > p {
     margin-top: 0;
     margin-bottom: 0;
 }
