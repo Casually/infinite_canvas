@@ -176,6 +176,7 @@ import SlashCommand from './SlashCommand'
 import { getSuggestion } from './suggestion'
 import MentionExtension from './MentionExtension'
 import { getMentionSuggestion } from './MentionSuggestion'
+import TagExtension from './TagExtension'
 import WebsiteCard from './WebsiteCard'
 import EChartsExtension from './EChartsExtension'
 import VideoExtension from './VideoExtension'
@@ -599,6 +600,7 @@ const editor = useEditor({
         ...getMentionSuggestion(getMentionUsers),
       },
     }),
+    TagExtension,
     WebsiteCard,
     EChartsExtension,
     VideoExtension,

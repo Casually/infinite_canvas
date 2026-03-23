@@ -3,7 +3,7 @@ import tippy from 'tippy.js'
 import CommandsList from './CommandsList.vue'
 import { Heading1, Heading2, Heading3, List, CheckSquare, Table, Image as ImageIcon, PenTool, Link, Globe, BarChart, Video, Music, Code, Minus, Highlighter, Sigma, Info, Calendar, Paperclip, GitGraph, Workflow, BrainCircuit, Clock } from 'lucide-vue-next'
 
-export const getSuggestion = (context: any) => {
+export const getSuggestion = (context: any): any => {
   return {
     items: ({ query }: { query: string }) => {
       const items = [
@@ -94,6 +94,16 @@ export const getSuggestion = (context: any) => {
           icon: Highlighter,
           command: ({ editor, range }: any) => {
             editor.chain().focus().deleteRange(range).toggleHighlight().run()
+          },
+        },
+        {
+          title: '标签',
+          icon: Highlighter,
+          command: ({ editor, range }: any) => {
+            editor.chain().focus().deleteRange(range).insertContent({
+              type: 'tag',
+              attrs: { label: '标签', color: '#2563eb' },
+            }).insertContent(' ').run()
           },
         },
         {

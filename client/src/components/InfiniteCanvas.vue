@@ -331,7 +331,7 @@
 
       <button 
         v-if="currentCanvasId"
-        @click="openShareForSelection"
+        @click="openShareCurrentCanvas"
         class="bg-white px-3 py-2 rounded-md shadow border hover:bg-gray-50 transition-colors text-sm font-medium text-blue-600 flex items-center gap-1"
       >
         <span>分享</span>
@@ -350,6 +350,7 @@
         :current-title="canvasTitle"
         :disabled="!user"
         @select="handleCanvasSelect"
+        @open-manager="showCanvasManagerModal = true"
       />
 
       <UserMenu 
@@ -359,7 +360,6 @@
       @logout="logout"
         @change-password="handleChangePassword"
         @open-shortcuts="showShortcutSettingsModal = true"
-        @open-canvas-manager="showCanvasManagerModal = true"
         @open-share-manager="showShareManagerModal = true"
         @update-user="handleUserUpdate"
         @export-data="handleExportData"
@@ -746,6 +746,72 @@ const handleCanvasSelect = async (id: string) => {
   showCanvasManagerModal.value = false
 }
 
+const sanitizeNodes = (inputNodes: any[]) => {
+  let working = (inputNodes || []).map(n => ({ ...n }))
+
+  const maxPasses = 3
+  for (let pass = 0; pass < maxPasses; pass++) {
+    const map = new Map<string, any>()
+    working.forEach(n => {
+      if (n?.id) map.set(n.id, n)
+    })
+
+    const getAbs = (id: string) => {
+      let x = 0
+      let y = 0
+      const visited = new Set<string>()
+      let curId: string | undefined = id
+      while (curId) {
+        if (visited.has(curId)) break
+        visited.add(curId)
+        const n = map.get(curId)
+        if (!n) break
+        x += n.position?.x || 0
+        y += n.position?.y || 0
+        const p = n.parentNode
+        if (p && map.get(p)?.type === 'group') curId = p
+        else break
+      }
+      return { x, y }
+    }
+
+    let changed = false
+    working = working.map(n => {
+      const parentId = n?.parentNode
+      if (!parentId) return n
+      if (parentId === n.id) {
+        changed = true
+        return { ...n, parentNode: undefined, position: getAbs(n.id), extent: undefined }
+      }
+
+      const visited = new Set<string>([n.id])
+      let pid: string | undefined = parentId
+      let valid = true
+      while (pid) {
+        if (visited.has(pid)) {
+          valid = false
+          break
+        }
+        visited.add(pid)
+        const pNode = map.get(pid)
+        if (!pNode || pNode.type !== 'group') {
+          valid = false
+          break
+        }
+        pid = pNode.parentNode
+      }
+
+      if (valid) return n
+      changed = true
+      return { ...n, parentNode: undefined, position: getAbs(n.id), extent: undefined }
+    })
+
+    if (!changed) break
+  }
+
+  return working
+}
+
 const loadCanvas = async (id: string, password?: string) => {
   const ensureNodeTimestamps = (node: any) => {
     const nowIso = new Date().toISOString()
@@ -850,7 +916,7 @@ const loadCanvas = async (id: string, password?: string) => {
           showConflictResolver.value = true
           
           // Show Local Data initially while resolving
-          nodes.value = normalizeNodes(localContent.nodes || [])
+          nodes.value = sanitizeNodes(normalizeNodes(localContent.nodes || []))
           edges.value = localContent.edges || []
           if (localContent.viewport) setViewport(localContent.viewport)
           triggerRef(nodes)
@@ -861,7 +927,7 @@ const loadCanvas = async (id: string, password?: string) => {
     }
 
     // No conflict, use Server Data
-    nodes.value = normalizeNodes(serverContent.nodes || [])
+    nodes.value = sanitizeNodes(normalizeNodes(serverContent.nodes || []))
     edges.value = serverContent.edges || []
       
     if (serverContent.viewport) {
@@ -884,7 +950,7 @@ const loadCanvas = async (id: string, password?: string) => {
     const cached = loadFromLocalCache(id)
     if (cached && cached.content) {
       const parsed = cached.content
-      nodes.value = normalizeNodes(parsed.nodes || [])
+      nodes.value = sanitizeNodes(normalizeNodes(parsed.nodes || []))
       edges.value = parsed.edges || []
       
       if (parsed.viewport) {
@@ -1071,6 +1137,8 @@ const openNodeTimerManager = (id: string) => {
 
 provide('openNodeTimerManager', openNodeTimerManager)
 
+const mentionUsersCache = new Map<string, { htmlKey: string, users: any[] }>()
+
 const getMentionUsers = () => {
   const list: any[] = []
   if (user.value) {
@@ -1090,9 +1158,40 @@ const getMentionUsers = () => {
       color: u.color,
     })
   })
+
+  nodes.value.forEach((n: any) => {
+    if (n?.type !== 'note') return
+    const html = n?.data?.content
+    if (typeof html !== 'string' || !html) return
+    const nodeId = String(n.id)
+    const cached = mentionUsersCache.get(nodeId)
+    if (!cached || cached.htmlKey !== html) {
+      let users: any[] = []
+      try {
+        const doc = new DOMParser().parseFromString(html, 'text/html')
+        const els = Array.from(doc.querySelectorAll('[data-type="mention"]')) as HTMLElement[]
+        users = els
+          .map(el => {
+            const username = (el.getAttribute('data-mention-name') || (el.textContent || '').replace('@', '').trim()).trim()
+            if (!username) return null
+            const id = (el.getAttribute('data-mention-id') || `custom:${username}`).trim()
+            return { id, username }
+          })
+          .filter(Boolean) as any[]
+      } catch {
+        users = []
+      }
+      mentionUsersCache.set(nodeId, { htmlKey: html, users })
+    }
+    const ulist = mentionUsersCache.get(nodeId)?.users || []
+    ulist.forEach(u => list.push(u))
+  })
+
   const seen = new Set<string>()
   return list.filter(u => {
-    const key = (u.id || u.username) as string
+    const uname = String(u.username || '').trim()
+    const id = String(u.id || '').trim()
+    const key = (uname ? `u:${uname.toLowerCase()}` : '') || (id ? `i:${id}` : '')
     if (!key) return false
     if (seen.has(key)) return false
     seen.add(key)
@@ -1894,6 +1993,12 @@ const openShareForSelection = () => {
   closeMenu()
 }
 
+const openShareCurrentCanvas = () => {
+  if (!currentCanvasId.value) return
+  showShareModal.value = true
+  closeMenu()
+}
+
 const openHelp = () => {
   window.open('https://icanvas.fengxiaozi.net/?shareId=6b10400d-51b9-46f7-8b6c-97975ed90966', '_blank')
 }
@@ -2189,6 +2294,21 @@ onNodeDragStop(({ nodes: draggedNodes }) => {
   const groups = allNodes.filter(n => n.type === 'group')
   let hasChanges = false
   const newNodes = [...nodes.value] // Create a copy for batch update
+  const nodeMap = new Map<string, any>()
+  newNodes.forEach(n => nodeMap.set(n.id, n))
+
+  const isDescendantOf = (descId: string, ancestorId: string) => {
+    const visited = new Set<string>()
+    let curId: string | undefined = descId
+    while (curId) {
+      if (visited.has(curId)) return true
+      visited.add(curId)
+      if (curId === ancestorId) return true
+      const n = nodeMap.get(curId)
+      curId = n?.parentNode
+    }
+    return false
+  }
 
   draggedNodes.forEach(draggedNode => {
     // Find the reactive node in our state
@@ -2229,6 +2349,15 @@ onNodeDragStop(({ nodes: draggedNodes }) => {
         centerY <= gAbsPos.y + gH
       ) {
         targetGroup = group
+      }
+    }
+
+    if (targetGroup && stateNode.type === 'group') {
+      const targetId = (targetGroup as any).id
+      if (targetId === stateNode.id) {
+        targetGroup = null
+      } else if (isDescendantOf(targetId, stateNode.id)) {
+        targetGroup = null
       }
     }
     
@@ -2279,7 +2408,7 @@ onNodeDragStop(({ nodes: draggedNodes }) => {
   })
   
   if (hasChanges) {
-    nodes.value = newNodes // Trigger reactivity
+    nodes.value = sanitizeNodes(newNodes) // Trigger reactivity
     logAndCommit()
   } else {
     // Even if no parent change, position might have changed, so we should log
